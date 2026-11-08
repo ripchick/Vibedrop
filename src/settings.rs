@@ -68,8 +68,6 @@ pub struct Settings {
     pub copy_on_import: bool,
     /// When removing a library entry, also delete the VibeDrop-managed copy (never the user's original).
     pub delete_managed_copy_on_remove: bool,
-    /// Artists followed on the Discover page (Internet Archive creators).
-    pub followed_artists: Vec<String>,
 }
 
 impl Default for Settings {
@@ -93,7 +91,6 @@ impl Default for Settings {
             close_behavior: CloseBehavior::Exit,
             copy_on_import: true,
             delete_managed_copy_on_remove: false,
-            followed_artists: Vec::new(),
         }
     }
 }

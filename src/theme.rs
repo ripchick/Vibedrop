@@ -1,4 +1,4 @@
-//! Central visual identity of VibeDrop: SOLAR OBSIDIAN DECK.
+//! Central visual identity of VibeDrop: CHARCOAL x BLUE (soundboard classic).
 //!
 //! All colors live here. `apply` installs the palette into egui, and the helpers below draw
 //! buttons, cards and icons that match it. Icons are painted with shapes (not font glyphs), so
@@ -11,38 +11,38 @@ use eframe::egui::{
 
 // ---- Palette ---------------------------------------------------------------------------------
 
-/// Window / page background `#160F0C`.
-pub const BG: Color32 = Color32::from_rgb(0x16, 0x0F, 0x0C);
-/// Cards and panels `#241811`.
-pub const CARD: Color32 = Color32::from_rgb(0x24, 0x18, 0x11);
+/// Window / page background `#141414`.
+pub const BG: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
+/// Cards and panels `#1E1E1E`.
+pub const CARD: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
 /// Card under the pointer.
-pub const CARD_HOVER: Color32 = Color32::from_rgb(0x2D, 0x20, 0x16);
+pub const CARD_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2A, 0x2A);
 /// Rail / deck background, a touch darker than the cards.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x12, 0x0C, 0x09);
+pub const SIDEBAR: Color32 = Color32::from_rgb(0x19, 0x19, 0x19);
 /// Input fields and slider rails.
-pub const INPUT_BG: Color32 = Color32::from_rgb(0x1B, 0x13, 0x0E);
-/// Primary accent `#FFB454` (warm solar amber).
-pub const ACCENT: Color32 = Color32::from_rgb(0xFF, 0xB4, 0x54);
+pub const INPUT_BG: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);
+/// Primary accent `#4DA3FF` (soundboard blue).
+pub const ACCENT: Color32 = Color32::from_rgb(0x4D, 0xA3, 0xFF);
 /// Accent on hover (slightly lighter).
-pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0xFF, 0xC4, 0x6F);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x6F, 0xB6, 0xFF);
 /// Muted accent for secondary strokes.
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0xB9, 0x77, 0x2D);
-/// Dark amber tint used behind selected / hovered accent elements.
-pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x3A, 0x24, 0x12);
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2E, 0x6B, 0xC2);
+/// Dark blue tint used behind selected / hovered accent elements.
+pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x1D, 0x2D, 0x42);
 /// Secondary accent for highlights and the brand mark.
-pub const ACCENT_ALT: Color32 = Color32::from_rgb(0x63, 0xD9, 0xC6);
-/// Borders `#3A2B1E`.
-pub const BORDER: Color32 = Color32::from_rgb(0x3A, 0x2B, 0x1E);
-/// Main text `#FFF3E6`.
-pub const TEXT: Color32 = Color32::from_rgb(0xFF, 0xF3, 0xE6);
+pub const ACCENT_ALT: Color32 = Color32::from_rgb(0x7C, 0xF0, 0xD4);
+/// Borders `#333333`.
+pub const BORDER: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+/// Main text `#EDEDED`.
+pub const TEXT: Color32 = Color32::from_rgb(0xED, 0xED, 0xED);
 /// Secondary text.
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0xC9, 0xB4, 0xA3);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0xA9, 0xA9, 0xA9);
 /// Disabled text and icons.
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8E, 0x7A, 0x6C);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
 /// Errors and destructive actions.
 pub const DANGER: Color32 = Color32::from_rgb(0xFF, 0x6B, 0x6B);
 /// Warnings.
-pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD1, 0x66);
+pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xC8, 0x57);
 
 // ---- egui style ------------------------------------------------------------------------------
 

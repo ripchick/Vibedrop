@@ -77,6 +77,9 @@ no audio driver bundled or required, Windows and Linux support.
 3. Optional: install VB-CABLE yourself if you want voice-chat routing, then follow the
    on-screen "How to set up the microphone route" help or
    [`docs/AUDIO_ROUTING.md`](docs/AUDIO_ROUTING.md).
+   Free official download: <https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip>
+   (or via Settings → VIRTUAL OUTPUT (FREE) → "Download free VB-CABLE", no driver ships
+   inside VibeDrop itself).
 
 ## Linux: installation
 
@@ -126,3 +129,12 @@ audio tests are written to pass with no playback/recording hardware present.
 
 Provide your OS, audio setup (which cable), the exact wording of the message you saw, and the
 steps to reproduce. Bug templates: `.github/ISSUE_TEMPLATE` (fall back to plain text).
+
+## Acknowledgements
+
+VibeDrop is an independent open-source project (Apache-2.0 license) — it is **not** the
+original Soundpad program. Soundpad is a trademark of its respective owner; this project is
+not affiliated with or endorsed by that owner. VB-CABLE is a freeware product of VB-Audio;
+it is not included in this repository and VB-Audio is not affiliated with this project.
+All other trademarks (Discord, PipeWire, PulseAudio, Linux, Windows) belong to their
+respective owners.
