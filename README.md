@@ -1,10 +1,25 @@
 # VibeDrop
 
+![CI](https://github.com/ripchick/Vibedrop/actions/workflows/ci.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](#)
+
 Free, open-source soundboard for voice chats, in the spirit of Soundpad: a sound library with
 global hotkeys, downloads via `soundpad://` links and a dual output — your headphones hear the
 sound, and the voice chat hears it through a second "microphone route". A desktop-first
 midnight blue-violet interface with top navigation, no audio driver bundled or required,
 Windows and Linux support.
+
+## Screenshots
+
+| Library | Favorites |
+| --- | --- |
+| ![Library](docs/screenshots/library.png) | ![Favorites](docs/screenshots/favorites.png) |
+
+| History | Settings |
+| --- | --- |
+| ![History](docs/screenshots/history.png) | ![Settings](docs/screenshots/settings.png) |
 
 * License: MIT (see [`LICENSE`](LICENSE))
 * Status & history: [`PROGRESS.md`](PROGRESS.md), [`CHANGELOG.md`](CHANGELOG.md)
