@@ -1,15 +1,17 @@
 # VibeDrop
 
 ![CI](https://github.com/ripchick/Vibedrop/actions/workflows/ci.yml/badge.svg)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](#)
 
 Free, open-source soundboard for voice chats, in the spirit of Soundpad: a sound library with
 global hotkeys, downloads via `soundpad://` links and a dual output — your headphones hear the
 sound, and the voice chat hears it through a second "microphone route". A desktop-first
-midnight blue-violet interface with top navigation, no audio driver bundled or required,
-Windows and Linux support.
+solar-obsidian interface — icon rail, sound-tile grid and a right-hand control deck —
+no audio driver bundled or required, Windows and Linux support.
+
+[Русский перевод](README.ru.md)
 
 ## Screenshots
 
@@ -21,7 +23,7 @@ Windows and Linux support.
 | --- | --- |
 | ![History](docs/screenshots/history.png) | ![Settings](docs/screenshots/settings.png) |
 
-* License: MIT (see [`LICENSE`](LICENSE))
+* License: Apache-2.0 (see [`LICENSE`](LICENSE))
 * Status & history: [`PROGRESS.md`](PROGRESS.md), [`CHANGELOG.md`](CHANGELOG.md)
 * Audio routing guide: [`docs/AUDIO_ROUTING.md`](docs/AUDIO_ROUTING.md)
 
@@ -61,8 +63,8 @@ Windows and Linux support.
   action, pause/cancel, part-file cleanup, files never executed.
 - Interface in **Russian or English** (switch in Settings → Application; the whole UI is one
   language at a time, including error messages from the core modules).
-- Settings organized into cards, midnight blue-violet theme with a desktop top bar, toasts
-  instead of panics, keyboard-friendly focus handling.
+- Settings organized into cards, solar-obsidian theme with an icon rail, tile grid and
+  control deck, toasts instead of panics, keyboard-friendly focus handling.
 
 ## Windows: installation
 

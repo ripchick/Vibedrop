@@ -1,8 +1,8 @@
 //! The VibeDrop window (egui / eframe).
 //!
-//! Layout: sidebar (Library, Favorites, History, Settings) on the left, the current page in the
-//! center and a player bar pinned to the bottom. All state changes go through `VibeDropApp`
-//! methods; the drawing code only collects "actions" and the update loop applies them afterwards.
+//! Layout: an icon rail on the left, the current page in the center and a control
+//! deck on the right. All state changes go through `VibeDropApp` methods; the drawing
+//! code only collects "actions" and the update loop applies them afterwards.
 
 // `ComboBox::from_id_source` was renamed in newer egui releases; the old name works in all of them.
 #![allow(deprecated)]
@@ -29,7 +29,7 @@ use crate::settings::{CloseBehavior, RetriggerPolicy, Settings};
 use crate::system::{self, ProtocolState, WakeHook};
 use crate::theme::{self, Icon};
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use eframe::egui::{self, vec2, Align, Align2, Color32, Key, Layout, RichText, Rounding, Sense, Stroke, Ui};
+use eframe::egui::{self, vec2, Align, Align2, Color32, Key, Layout, RichText, Sense, Stroke, Ui};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -1114,66 +1114,55 @@ impl VibeDropApp {
 
     // ---- Drawing: panels ---------------------------------------------------------------------
 
-    fn draw_topbar(&mut self, ctx: &egui::Context) {
+    fn draw_dock(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
-        egui::TopBottomPanel::top("topbar")
-            .exact_height(84.0)
+        egui::SidePanel::left("rail")
+            .exact_width(96.0)
+            .resizable(false)
             .frame(
                 egui::Frame::none()
                     .fill(theme::SIDEBAR)
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(26.0, 16.0)),
+                    .inner_margin(egui::Margin::symmetric(11.0, 14.0)),
             )
             .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    let (mark, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
-                    if ui.is_rect_visible(mark) {
-                        ui.painter().rect_filled(mark, Rounding::same(12.0), theme::ACCENT_FILL);
-                        ui.painter()
-                            .rect_stroke(mark, Rounding::same(12.0), Stroke::new(1.0_f32, theme::ACCENT_DIM));
-                        theme::paint_icon(ui.painter(), Icon::Volume, mark.center(), 22.0, theme::ACCENT);
-                    }
-                    ui.add_space(10.0);
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.0;
-                            ui.label(RichText::new("Vibe").size(21.0).strong().color(theme::TEXT));
-                            ui.label(RichText::new("Drop").size(21.0).strong().color(theme::ACCENT));
-                        });
-                        ui.label(RichText::new("SOUNDBOARD").size(9.5).strong().color(theme::TEXT_FAINT));
-                    });
-                    ui.add_space(34.0);
+                ui.vertical_centered(|ui| {
+                    let (mark, _) = ui.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
+                    theme::brand_mark(ui.painter(), mark);
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("VIBE").size(11.0).strong().color(theme::TEXT));
+                    ui.label(RichText::new("DROP").size(11.0).strong().color(theme::ACCENT));
+                    ui.add_space(18.0);
                     for page in Page::ALL {
-                        if theme::nav_pill(ui, page.icon(), lang::t(&lang, page.title()), self.page == page).clicked() {
+                        if theme::rail_button(ui, page.icon(), lang::t(&lang, page.title()), self.page == page)
+                            .on_hover_text(lang::t(&lang, page.title()))
+                            .clicked()
+                        {
                             self.page = page;
                             if page == Page::Settings {
                                 self.protocol_state = system::protocol_state();
                             }
                         }
-                        ui.add_space(2.0);
+                        ui.add_space(6.0);
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if theme::icon_button(ui, Icon::Quit, 18.0, false)
-                            .on_hover_text(lang::t(&lang, "Quit VibeDrop"))
-                            .clicked()
-                        {
-                            self.quitting = true;
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                        let favorites = self.library.favorites().len();
-                        let counts = if lang::ru(&lang) {
-                            format!("{} звуков · {} избранных", self.library.len(), favorites)
-                        } else {
-                            format!("{} sounds · {} favorites", self.library.len(), favorites)
-                        };
-                        ui.label(RichText::new(counts).size(12.0).color(theme::TEXT_FAINT));
-                    });
+                    ui.add_space((ui.available_height() - 78.0).max(0.0));
+                    ui.label(
+                        RichText::new(format!("{} sounds", self.library.len()))
+                            .size(11.0)
+                            .color(theme::TEXT_FAINT),
+                    );
+                    if theme::icon_button(ui, Icon::Quit, 19.0, false)
+                        .on_hover_text(lang::t(&lang, "Quit VibeDrop"))
+                        .clicked()
+                    {
+                        self.quitting = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                 });
             });
     }
 
-    fn draw_player(&mut self, ctx: &egui::Context) {
+    fn draw_deck(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
         let ru = lang::ru(&lang);
         let now_id = self.now_playing.clone();
@@ -1191,166 +1180,156 @@ impl VibeDropApp {
         let mut levels_changed = false;
         let mut mic_click = false;
 
-        egui::TopBottomPanel::bottom("player")
-            .min_height(120.0)
+        egui::SidePanel::right("deck")
+            .exact_width(324.0)
+            .resizable(false)
             .frame(
                 egui::Frame::none()
-                    .fill(theme::BG)
-                    .inner_margin(egui::Margin::symmetric(20.0, 10.0)),
+                    .fill(theme::SIDEBAR)
+                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
+                    .inner_margin(egui::Margin::symmetric(14.0, 16.0)),
             )
             .show(ctx, |ui| {
-                egui::Frame::none()
-                    .fill(theme::CARD)
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .rounding(Rounding::same(20.0))
-                    .inner_margin(egui::Margin::symmetric(22.0, 12.0))
-                    .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing.y = 12.0;
+
+                    theme::section_title(ui, lang::t(&lang, "NOW PLAYING"));
+                    theme::deck_card().show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            let spacing = ui.spacing().item_spacing.x;
-                            let right_w = 372.0;
-                            let mid_w = 190.0;
-                            let left_w = (ui.available_width() - right_w - mid_w - 2.0 * spacing).max(150.0);
-
-                            ui.allocate_ui_with_layout(vec2(left_w, 92.0), Layout::top_down(Align::Min), |ui| {
-                                ui.set_width(left_w);
-                                ui.spacing_mut().item_spacing.y = 4.0;
-                                ui.add_space(14.0);
-                                let (title, color) = match &now_name {
-                                    Some(n) => (n.clone(), if playing { theme::ACCENT } else { theme::TEXT }),
-                                    None => (lang::t(&lang, "Nothing playing").to_string(), theme::TEXT_DIM),
-                                };
-                                ui.add(
-                                    egui::Label::new(RichText::new(title).size(15.5).strong().color(color))
-                                        .wrap_mode(egui::TextWrapMode::Truncate),
-                                );
-                                match (playing, progress) {
-                                    (true, Some((pos, total))) => {
-                                        let width = ui.available_width().min(300.0);
-                                        let (rect, _) = ui.allocate_exact_size(vec2(width, 5.0), Sense::hover());
-                                        ui.painter().rect_filled(rect, 3.0, theme::BORDER);
-                                        let frac = if total > 0.0 {
-                                            (pos / total).clamp(0.0, 1.0) as f32
-                                        } else {
-                                            0.0
-                                        };
-                                        let filled = egui::Rect::from_min_size(rect.min, vec2(width * frac, 5.0));
-                                        ui.painter().rect_filled(filled, 3.0, theme::ACCENT);
-                                        let text = if ru {
-                                            format!(
-                                                "{} / {}   |   Играет: {}",
-                                                theme::fmt_time(pos),
-                                                theme::fmt_time(total),
-                                                voices
-                                            )
-                                        } else {
-                                            format!(
-                                                "{} / {}   |   {} playing",
-                                                theme::fmt_time(pos),
-                                                theme::fmt_time(total),
-                                                voices
-                                            )
-                                        };
-                                        ui.label(RichText::new(text).size(12.5).color(theme::TEXT_DIM));
-                                    }
-                                    _ if voices > 0 => {
-                                        let text = if ru {
-                                            format!("Играет: {voices}")
-                                        } else {
-                                            format!("{voices} playing")
-                                        };
-                                        ui.label(RichText::new(text).size(12.5).color(theme::TEXT_DIM));
-                                    }
-                                    _ => {
-                                        ui.label(
-                                            RichText::new(lang::t(&lang, "Press a sound's play button or its hotkey"))
-                                                .size(12.5)
-                                                .color(theme::TEXT_FAINT),
-                                        );
-                                    }
-                                }
-                            });
-
-                            ui.allocate_ui_with_layout(vec2(mid_w, 92.0), Layout::left_to_right(Align::Center), |ui| {
-                                ui.add_space(6.0);
-                                let icon = if playing { Icon::Stop } else { Icon::Play };
-                                let tip = if playing {
-                                    lang::t(&lang, "Stop this sound")
+                        let (title, color) = match &now_name {
+                            Some(n) => (n.clone(), if playing { theme::ACCENT } else { theme::TEXT }),
+                            None => (lang::t(&lang, "Nothing playing").to_string(), theme::TEXT_DIM),
+                        };
+                        ui.add(
+                            egui::Label::new(RichText::new(title).size(21.0).strong().color(color))
+                                .wrap_mode(egui::TextWrapMode::Truncate),
+                        );
+                        match (playing, progress) {
+                            (true, Some((pos, total))) => {
+                                let width = ui.available_width();
+                                let (rect, _) = ui.allocate_exact_size(vec2(width, 6.0), Sense::hover());
+                                ui.painter().rect_filled(rect, 3.0, theme::BORDER);
+                                let frac = if total > 0.0 {
+                                    (pos / total).clamp(0.0, 1.0) as f32
                                 } else {
-                                    lang::t(&lang, "Play it again")
+                                    0.0
                                 };
-                                if theme::round_button(ui, icon, 46.0, true, now_id.is_some())
-                                    .on_hover_text(tip)
-                                    .clicked()
-                                {
-                                    toggle = true;
-                                }
-                                if theme::danger_button(ui, lang::t(&lang, "Stop All")).clicked() {
-                                    stop_all = true;
-                                }
-                            });
+                                let filled = egui::Rect::from_min_size(rect.min, vec2(width * frac, 6.0));
+                                ui.painter().rect_filled(filled, 3.0, theme::ACCENT);
+                                let text = if ru {
+                                    format!(
+                                        "{} / {}   |   РРіСЂР°РµС‚: {}",
+                                        theme::fmt_time(pos),
+                                        theme::fmt_time(total),
+                                        voices
+                                    )
+                                } else {
+                                    format!(
+                                        "{} / {}   |   {} playing",
+                                        theme::fmt_time(pos),
+                                        theme::fmt_time(total),
+                                        voices
+                                    )
+                                };
+                                ui.label(RichText::new(text).size(12.5).color(theme::TEXT_DIM));
+                            }
+                            _ if voices > 0 => {
+                                let text = if ru {
+                                    format!("РРіСЂР°РµС‚: {voices}")
+                                } else {
+                                    format!("{voices} playing")
+                                };
+                                ui.label(RichText::new(text).size(12.5).color(theme::TEXT_DIM));
+                            }
+                            _ => {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(lang::t(&lang, "Press a sound's play button or its hotkey"))
+                                            .size(12.5)
+                                            .color(theme::TEXT_FAINT),
+                                    )
+                                    .wrap_mode(egui::TextWrapMode::Wrap),
+                                );
+                            }
+                        }
+                    });
 
-                            ui.allocate_ui_with_layout(vec2(right_w, 92.0), Layout::top_down(Align::Min), |ui| {
-                                ui.spacing_mut().interact_size.y = 28.0;
-                                ui.spacing_mut().item_spacing.y = 3.0;
-                                levels_changed |=
-                                    volume_row(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
-                                levels_changed |=
-                                    volume_row(ui, lang::t(&lang, "Phones"), &mut self.settings.main_volume, true);
-                                ui.horizontal(|ui| {
-                                    levels_changed |= volume_row_inline(
-                                        ui,
-                                        lang::t(&lang, "Mic"),
-                                        &mut self.settings.mic_volume,
-                                        self.settings.secondary_enabled,
-                                    );
-                                    let (text, color, filled, tip) = if !self.settings.secondary_enabled {
-                                        (
-                                            lang::t(&lang, "MIC OFF"),
-                                            theme::TEXT_DIM,
-                                            false,
-                                            lang::t(&lang, "The microphone route is off. Click to set it up."),
-                                        )
-                                    } else if mic_state.is_active() {
-                                        if self.settings.mic_muted {
-                                            (
-                                                lang::t(&lang, "MIC MUTED"),
-                                                theme::WARNING,
-                                                false,
-                                                lang::t(
-                                                    &lang,
-                                                    "Sounds are not sent to the microphone. Click to unmute.",
-                                                ),
-                                            )
-                                        } else {
-                                            (
-                                                lang::t(&lang, "MIC ON"),
-                                                theme::ACCENT,
-                                                true,
-                                                lang::t(
-                                                    &lang,
-                                                    "Sounds are sent to the microphone route. Click to mute it.",
-                                                ),
-                                            )
-                                        }
-                                    } else {
-                                        (
-                                            lang::t(&lang, "MIC !"),
-                                            theme::DANGER,
-                                            false,
-                                            lang::t(
-                                                &lang,
-                                                "The microphone route has a problem. Click to open Settings.",
-                                            ),
-                                        )
-                                    };
-                                    if theme::chip(ui, text, color, filled).on_hover_text(tip).clicked() {
-                                        mic_click = true;
-                                    }
-                                });
-                            });
+                    theme::deck_card().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.set_width(ui.available_width());
+                            let icon = if playing { Icon::Stop } else { Icon::Play };
+                            let tip = if playing {
+                                lang::t(&lang, "Stop this sound")
+                            } else {
+                                lang::t(&lang, "Play it again")
+                            };
+                            if theme::round_button(ui, icon, 54.0, true, now_id.is_some())
+                                .on_hover_text(tip)
+                                .clicked()
+                            {
+                                toggle = true;
+                            }
+                            if theme::danger_button(ui, lang::t(&lang, "Stop All")).clicked() {
+                                stop_all = true;
+                            }
                         });
                     });
+
+                    theme::section_title(ui, lang::t(&lang, "LEVELS"));
+                    theme::deck_card().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.spacing_mut().interact_size.y = 30.0;
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        ui.spacing_mut().slider_width = 112.0;
+                        levels_changed |=
+                            volume_row(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
+                        levels_changed |=
+                            volume_row(ui, lang::t(&lang, "Phones"), &mut self.settings.main_volume, true);
+                        levels_changed |= volume_row(
+                            ui,
+                            lang::t(&lang, "Mic"),
+                            &mut self.settings.mic_volume,
+                            self.settings.secondary_enabled,
+                        );
+                        ui.horizontal(|ui| {
+                            let (text, color, filled, tip) = if !self.settings.secondary_enabled {
+                                (
+                                    lang::t(&lang, "MIC OFF"),
+                                    theme::TEXT_DIM,
+                                    false,
+                                    lang::t(&lang, "The microphone route is off. Click to set it up."),
+                                )
+                            } else if mic_state.is_active() {
+                                if self.settings.mic_muted {
+                                    (
+                                        lang::t(&lang, "MIC MUTED"),
+                                        theme::WARNING,
+                                        false,
+                                        lang::t(&lang, "Sounds are not sent to the microphone. Click to unmute."),
+                                    )
+                                } else {
+                                    (
+                                        lang::t(&lang, "MIC ON"),
+                                        theme::ACCENT,
+                                        true,
+                                        lang::t(&lang, "Sounds are sent to the microphone route. Click to mute it."),
+                                    )
+                                }
+                            } else {
+                                (
+                                    lang::t(&lang, "MIC !"),
+                                    theme::DANGER,
+                                    false,
+                                    lang::t(&lang, "The microphone route has a problem. Click to open Settings."),
+                                )
+                            };
+                            if theme::chip(ui, text, color, filled).on_hover_text(tip).clicked() {
+                                mic_click = true;
+                            }
+                        });
+                    });
+                });
             });
 
         if levels_changed {
@@ -1377,10 +1356,9 @@ impl VibeDropApp {
             }
         }
     }
-
     /// A banner under the window top when an audio device needs attention. A silent failure is
     /// the worst outcome, so everything that is not "working as chosen" is shown here.
-    fn draw_alerts(&mut self, ctx: &egui::Context) {
+    fn draw_alert_banner(&mut self, ui: &mut Ui) {
         let lang = self.settings.language.clone();
         let mut lines: Vec<(String, bool)> = Vec::new();
         let main = self.engine.route_state(OutputRole::Main);
@@ -1424,28 +1402,22 @@ impl VibeDropApp {
             return;
         }
         let mut open_settings = false;
-        egui::TopBottomPanel::top("alerts")
-            .frame(
-                egui::Frame::none()
-                    .fill(theme::CARD)
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(22.0, 8.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.vertical(|ui| {
-                        for (text, severe) in &lines {
-                            let color = if *severe { theme::DANGER } else { theme::WARNING };
-                            ui.label(RichText::new(format!("\u{25CF} {text}")).size(13.0).color(color));
-                        }
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if theme::secondary_button(ui, lang::t(&lang, "Audio settings")).clicked() {
-                            open_settings = true;
-                        }
-                    });
+        theme::card().show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.vertical(|ui| {
+                    for (text, severe) in &lines {
+                        let color = if *severe { theme::DANGER } else { theme::WARNING };
+                        ui.label(RichText::new(format!("\u{25CF} {text}")).size(13.0).color(color));
+                    }
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::secondary_button(ui, lang::t(&lang, "Audio settings")).clicked() {
+                        open_settings = true;
+                    }
                 });
             });
+        });
+        ui.add_space(10.0);
         if open_settings {
             self.page = Page::Settings;
         }
@@ -1458,10 +1430,13 @@ impl VibeDropApp {
                     .fill(theme::BG)
                     .inner_margin(egui::Margin::symmetric(26.0, 20.0)),
             )
-            .show(ctx, |ui| match self.page {
-                Page::Library | Page::Favorites => self.draw_sound_page(ui),
-                Page::History => self.draw_history_page(ui),
-                Page::Settings => self.draw_settings_page(ui),
+            .show(ctx, |ui| {
+                self.draw_alert_banner(ui);
+                match self.page {
+                    Page::Library | Page::Favorites => self.draw_sound_page(ui),
+                    Page::History => self.draw_history_page(ui),
+                    Page::Settings => self.draw_settings_page(ui),
+                }
             });
     }
 
@@ -1474,15 +1449,25 @@ impl VibeDropApp {
         let mut want_url = false;
         let mut want_check = false;
 
+        let favorites = self.library.favorites().len();
+        let total = self.library.len();
         let (title, subtitle) = if favorites_only {
             (
                 lang::t(&lang, "Favorites"),
-                lang::t(&lang, "Everything you starred, in one place."),
+                lang::t(&lang, "Everything you starred, in one place.").to_string(),
+            )
+        } else if lang::ru(&lang) {
+            (
+                lang::t(&lang, "Library"),
+                format!("{total} звуков · {favorites} избранных"),
             )
         } else {
-            (lang::t(&lang, "Library"), lang::t(&lang, "Your sounds, one tap away."))
+            (
+                lang::t(&lang, "Library"),
+                format!("{total} sounds · {favorites} favorites"),
+            )
         };
-        page_header(ui, title, subtitle, |ui| {
+        page_header(ui, title, &subtitle, |ui| {
             if !favorites_only {
                 if theme::primary_button(ui, lang::t(&lang, "Add from URL")).clicked() {
                     want_url = true;
@@ -1627,35 +1612,53 @@ impl VibeDropApp {
 
         let mut action: Option<Action> = None;
         if rows.is_empty() {
-            ui.add_space(60.0);
-            ui.vertical_centered(|ui| {
-                let (title, hint) = if !query.trim().is_empty() {
-                    (
-                        lang::t(&lang, "No sounds match your search"),
-                        lang::t(&lang, "Try a different name."),
-                    )
-                } else if favorites_only {
-                    (
-                        lang::t(&lang, "No favorites yet"),
-                        lang::t(&lang, "Click the star on a sound to pin it here."),
-                    )
-                } else {
-                    (
-                        lang::t(&lang, "Your library is empty"),
-                        lang::t(&lang, "Use Import, drop WAV/MP3 files here, or add a sound from a URL."),
-                    )
-                };
-                ui.label(RichText::new(title).size(20.0).strong().color(theme::TEXT));
-                ui.label(RichText::new(hint).color(theme::TEXT_DIM));
+            ui.add_space(44.0);
+            theme::card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical_centered(|ui| {
+                    let (title, hint) = if !query.trim().is_empty() {
+                        (
+                            lang::t(&lang, "No sounds match your search"),
+                            lang::t(&lang, "Try a different name."),
+                        )
+                    } else if favorites_only {
+                        (
+                            lang::t(&lang, "No favorites yet"),
+                            lang::t(&lang, "Click the star on a sound to pin it here."),
+                        )
+                    } else {
+                        (
+                            lang::t(&lang, "Your library is empty"),
+                            lang::t(&lang, "Use Import, drop WAV/MP3 files here, or add a sound from a URL."),
+                        )
+                    };
+                    ui.label(RichText::new(title).size(22.0).strong().color(theme::TEXT));
+                    ui.label(RichText::new(hint).color(theme::TEXT_DIM));
+                });
             });
         } else {
             ui.push_id(self.page as u8, |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 8.0;
-                    for row in &rows {
-                        Self::draw_row(ui, row, &mut action, &lang);
+                    let cols = if ui.available_width() > 700.0 {
+                        3
+                    } else if ui.available_width() > 480.0 {
+                        2
+                    } else {
+                        1
+                    };
+                    let spacing = 12.0;
+                    let col_w = ((ui.available_width() - spacing * (cols - 1) as f32) / cols as f32).max(140.0);
+                    for chunk in rows.chunks(cols) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = spacing;
+                            for row in chunk {
+                                ui.allocate_ui_with_layout(vec2(col_w, 164.0), Layout::top_down(Align::Min), |ui| {
+                                    Self::draw_tile(ui, row, &mut action, &lang);
+                                });
+                            }
+                        });
+                        ui.add_space(spacing);
                     }
-                    ui.add_space(8.0);
                 });
             });
         }
@@ -1678,93 +1681,89 @@ impl VibeDropApp {
         }
     }
 
-    fn draw_row(ui: &mut Ui, row: &Row, action: &mut Option<Action>, lang: &str) {
-        theme::sound_card(row.playing).show(ui, |ui| {
+    fn draw_tile(ui: &mut Ui, row: &Row, action: &mut Option<Action>, lang: &str) {
+        theme::tile_card(row.playing).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.set_min_height(46.0);
-                if row.playing {
-                    let (bar, _) = ui.allocate_exact_size(vec2(3.0, 40.0), Sense::hover());
-                    ui.painter().rect_filled(bar, Rounding::same(2.0), theme::ACCENT);
-                }
-                let icon = if row.playing { Icon::Stop } else { Icon::Play };
-                if theme::round_button(ui, icon, 38.0, true, !row.missing).clicked() {
-                    *action = Some(if row.playing {
-                        Action::Stop(row.id.clone())
-                    } else {
-                        Action::Play(row.id.clone())
-                    });
-                }
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    let icon = if row.playing { Icon::Stop } else { Icon::Play };
+                    if theme::round_button(ui, icon, 40.0, true, !row.missing).clicked() {
+                        *action = Some(if row.playing {
+                            Action::Stop(row.id.clone())
+                        } else {
+                            Action::Play(row.id.clone())
+                        });
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add_space(1.0);
+                        ui.menu_button("\u{2022}\u{2022}\u{2022}", |ui| {
+                            if ui.button(lang::t(lang, "Rename")).clicked() {
+                                *action = Some(Action::Rename(row.id.clone()));
+                                ui.close_menu();
+                            }
+                            if ui.button(lang::t(lang, "Set hotkey...")).clicked() {
+                                *action = Some(Action::EditHotkey(row.id.clone()));
+                                ui.close_menu();
+                            }
+                            if row.hotkey.is_some() && ui.button(lang::t(lang, "Clear hotkey")).clicked() {
+                                *action = Some(Action::ClearHotkey(row.id.clone()));
+                                ui.close_menu();
+                            }
+                            if row.missing && ui.button(lang::t(lang, "Locate file...")).clicked() {
+                                *action = Some(Action::Relink(row.id.clone()));
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            ui.label(
+                                RichText::new(lang::t(lang, "Sound volume"))
+                                    .size(12.5)
+                                    .color(theme::TEXT_DIM),
+                            );
+                            let mut volume = row.volume;
+                            let slider = egui::Slider::new(&mut volume, 0.0..=MAX_ENTRY_VOLUME)
+                                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0));
+                            if ui.add(slider).changed() {
+                                *action = Some(Action::SetVolume(row.id.clone(), volume));
+                            }
+                            ui.separator();
+                            if ui
+                                .button(RichText::new(lang::t(lang, "Remove from library")).color(theme::DANGER))
+                                .clicked()
+                            {
+                                *action = Some(Action::Remove(row.id.clone()));
+                                ui.close_menu();
+                            }
+                        });
 
-                let name_width = (ui.available_width() - 300.0).max(140.0);
-                ui.allocate_ui_with_layout(vec2(name_width, 46.0), Layout::top_down(Align::Min), |ui| {
-                    ui.set_width(name_width);
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    let name_color = if row.playing { theme::ACCENT } else { theme::TEXT };
-                    ui.add(
-                        egui::Label::new(RichText::new(&row.name).size(16.0).strong().color(name_color))
-                            .wrap_mode(egui::TextWrapMode::Truncate),
-                    );
-                    let meta_color = if row.missing { theme::DANGER } else { theme::TEXT_DIM };
-                    ui.add(
-                        egui::Label::new(RichText::new(&row.meta).size(12.5).color(meta_color))
-                            .wrap_mode(egui::TextWrapMode::Truncate),
-                    );
-                });
-
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.menu_button("\u{2022}\u{2022}\u{2022}", |ui| {
-                        if ui.button(lang::t(lang, "Rename")).clicked() {
-                            *action = Some(Action::Rename(row.id.clone()));
-                            ui.close_menu();
-                        }
-                        if ui.button(lang::t(lang, "Set hotkey...")).clicked() {
-                            *action = Some(Action::EditHotkey(row.id.clone()));
-                            ui.close_menu();
-                        }
-                        if row.hotkey.is_some() && ui.button(lang::t(lang, "Clear hotkey")).clicked() {
-                            *action = Some(Action::ClearHotkey(row.id.clone()));
-                            ui.close_menu();
-                        }
-                        if row.missing && ui.button(lang::t(lang, "Locate file...")).clicked() {
-                            *action = Some(Action::Relink(row.id.clone()));
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        ui.label(
-                            RichText::new(lang::t(lang, "Sound volume"))
-                                .size(12.5)
-                                .color(theme::TEXT_DIM),
-                        );
-                        let mut volume = row.volume;
-                        let slider = egui::Slider::new(&mut volume, 0.0..=MAX_ENTRY_VOLUME)
-                            .custom_formatter(|v, _| format!("{:.0}%", v * 100.0));
-                        if ui.add(slider).changed() {
-                            *action = Some(Action::SetVolume(row.id.clone(), volume));
-                        }
-                        ui.separator();
-                        if ui
-                            .button(RichText::new(lang::t(lang, "Remove from library")).color(theme::DANGER))
+                        let star = if row.favorite { Icon::Star } else { Icon::StarOutline };
+                        let tip = if row.favorite {
+                            lang::t(lang, "Remove from favorites")
+                        } else {
+                            lang::t(lang, "Add to favorites")
+                        };
+                        if theme::icon_button(ui, star, 19.0, row.favorite)
+                            .on_hover_text(tip)
                             .clicked()
                         {
-                            *action = Some(Action::Remove(row.id.clone()));
-                            ui.close_menu();
+                            *action = Some(Action::ToggleFavorite(row.id.clone()));
                         }
                     });
+                });
 
-                    let star = if row.favorite { Icon::Star } else { Icon::StarOutline };
-                    let tip = if row.favorite {
-                        lang::t(lang, "Remove from favorites")
-                    } else {
-                        lang::t(lang, "Add to favorites")
-                    };
-                    if theme::icon_button(ui, star, 20.0, row.favorite)
-                        .on_hover_text(tip)
-                        .clicked()
-                    {
-                        *action = Some(Action::ToggleFavorite(row.id.clone()));
-                    }
+                ui.add_space(8.0);
+                let name_color = if row.playing { theme::ACCENT } else { theme::TEXT };
+                ui.add(
+                    egui::Label::new(RichText::new(&row.name).size(16.5).strong().color(name_color))
+                        .wrap_mode(egui::TextWrapMode::Truncate),
+                );
+                let meta_color = if row.missing { theme::DANGER } else { theme::TEXT_DIM };
+                ui.add(
+                    egui::Label::new(RichText::new(&row.meta).size(12.5).color(meta_color))
+                        .wrap_mode(egui::TextWrapMode::Truncate),
+                );
 
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
                     let (text, color, filled) = match (&row.hotkey, row.hotkey_inactive) {
                         (Some(h), false) => (h.clone(), theme::ACCENT, true),
                         (Some(h), true) => (format!("{h} {}", lang::t(lang, "(inactive)")), theme::WARNING, false),
@@ -1781,11 +1780,17 @@ impl VibeDropApp {
                     if theme::chip(ui, &text, color, filled).on_hover_text(tip).clicked() {
                         *action = Some(Action::EditHotkey(row.id.clone()));
                     }
+                    if row.missing {
+                        ui.label(
+                            RichText::new(lang::t(lang, "File missing"))
+                                .size(12.0)
+                                .color(theme::DANGER),
+                        );
+                    }
                 });
             });
         });
     }
-
     fn apply_action(&mut self, action: Action) {
         match action {
             Action::Play(id) => self.play_sound(&id),
@@ -2988,8 +2993,8 @@ fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&m
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
-            ui.label(RichText::new(title).size(30.0).strong().color(theme::TEXT));
-            ui.label(RichText::new(subtitle).size(12.5).color(theme::TEXT_DIM));
+            ui.label(RichText::new(title).size(34.0).strong().color(theme::TEXT));
+            ui.label(RichText::new(subtitle).size(13.0).color(theme::TEXT_DIM));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), actions);
     });
@@ -3004,7 +3009,7 @@ fn volume_row_inline(ui: &mut Ui, label: &str, value: &mut f32, enabled: bool) -
         vec2(52.0, 18.0),
         egui::Label::new(RichText::new(label).size(12.5).color(theme::TEXT_DIM)),
     );
-    ui.spacing_mut().slider_width = 130.0;
+    ui.spacing_mut().slider_width = ui.spacing().slider_width.min(130.0);
     let changed = ui
         .add_enabled(enabled, egui::Slider::new(value, 0.0..=1.0).show_value(false))
         .changed();
@@ -3164,9 +3169,8 @@ impl eframe::App for VibeDropApp {
         self.pump_events(ctx);
         self.handle_close(ctx);
 
-        self.draw_topbar(ctx);
-        self.draw_player(ctx);
-        self.draw_alerts(ctx);
+        self.draw_dock(ctx);
+        self.draw_deck(ctx);
         self.draw_central(ctx);
 
         self.draw_rename_dialog(ctx);

@@ -33,7 +33,9 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "History" => "История",
         "Settings" => "Настройки",
         "Quit VibeDrop" => "Выйти из VibeDrop",
-        // Player bar.
+        // Player deck.
+        "NOW PLAYING" => "СЕЙЧАС ИГРАЕТ",
+        "LEVELS" => "УРОВНИ",
         "Nothing playing" => "Ничего не играет",
         "Press a sound's play button or its hotkey" => "Нажмите кнопку воспроизведения звука или его горячую клавишу",
         "Stop this sound" => "Остановить этот звук",

@@ -1,4 +1,4 @@
-//! Central visual identity of VibeDrop: MIDNIGHT BLUE-VIOLET.
+//! Central visual identity of VibeDrop: SOLAR OBSIDIAN DECK.
 //!
 //! All colors live here. `apply` installs the palette into egui, and the helpers below draw
 //! buttons, cards and icons that match it. Icons are painted with shapes (not font glyphs), so
@@ -11,38 +11,38 @@ use eframe::egui::{
 
 // ---- Palette ---------------------------------------------------------------------------------
 
-/// Window / page background `#0A0C14`.
-pub const BG: Color32 = Color32::from_rgb(0x0A, 0x0C, 0x14);
-/// Cards and panels `#121628`.
-pub const CARD: Color32 = Color32::from_rgb(0x12, 0x16, 0x28);
+/// Window / page background `#160F0C`.
+pub const BG: Color32 = Color32::from_rgb(0x16, 0x0F, 0x0C);
+/// Cards and panels `#241811`.
+pub const CARD: Color32 = Color32::from_rgb(0x24, 0x18, 0x11);
 /// Card under the pointer.
-pub const CARD_HOVER: Color32 = Color32::from_rgb(0x1A, 0x20, 0x36);
-/// Header background, a touch darker than the cards.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x0D, 0x10, 0x1C);
+pub const CARD_HOVER: Color32 = Color32::from_rgb(0x2D, 0x20, 0x16);
+/// Rail / deck background, a touch darker than the cards.
+pub const SIDEBAR: Color32 = Color32::from_rgb(0x12, 0x0C, 0x09);
 /// Input fields and slider rails.
-pub const INPUT_BG: Color32 = Color32::from_rgb(0x0D, 0x11, 0x1E);
-/// Primary accent `#6C8CFF` (soft periwinkle blue).
-pub const ACCENT: Color32 = Color32::from_rgb(0x6C, 0x8C, 0xFF);
+pub const INPUT_BG: Color32 = Color32::from_rgb(0x1B, 0x13, 0x0E);
+/// Primary accent `#FFB454` (warm solar amber).
+pub const ACCENT: Color32 = Color32::from_rgb(0xFF, 0xB4, 0x54);
 /// Accent on hover (slightly lighter).
-pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x92, 0xAB, 0xFF);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0xFF, 0xC4, 0x6F);
 /// Muted accent for secondary strokes.
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x3A, 0x55, 0xC8);
-/// Dark blue tint used behind selected / hovered accent elements.
-pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x17, 0x22, 0x4A);
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(0xB9, 0x77, 0x2D);
+/// Dark amber tint used behind selected / hovered accent elements.
+pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x3A, 0x24, 0x12);
 /// Secondary accent for highlights and the brand mark.
-pub const ACCENT_ALT: Color32 = Color32::from_rgb(0xA7, 0x8B, 0xFA);
-/// Borders `#232B45`.
-pub const BORDER: Color32 = Color32::from_rgb(0x23, 0x2B, 0x45);
-/// Main text `#F4F6FF`.
-pub const TEXT: Color32 = Color32::from_rgb(0xF4, 0xF6, 0xFF);
+pub const ACCENT_ALT: Color32 = Color32::from_rgb(0x63, 0xD9, 0xC6);
+/// Borders `#3A2B1E`.
+pub const BORDER: Color32 = Color32::from_rgb(0x3A, 0x2B, 0x1E);
+/// Main text `#FFF3E6`.
+pub const TEXT: Color32 = Color32::from_rgb(0xFF, 0xF3, 0xE6);
 /// Secondary text.
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0x9A, 0xA5, 0xBD);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0xC9, 0xB4, 0xA3);
 /// Disabled text and icons.
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x5A, 0x66, 0x83);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8E, 0x7A, 0x6C);
 /// Errors and destructive actions.
-pub const DANGER: Color32 = Color32::from_rgb(0xFF, 0x5C, 0x7A);
+pub const DANGER: Color32 = Color32::from_rgb(0xFF, 0x6B, 0x6B);
 /// Warnings.
-pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xC8, 0x57);
+pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD1, 0x66);
 
 // ---- egui style ------------------------------------------------------------------------------
 
@@ -56,26 +56,26 @@ pub fn apply(ctx: &egui::Context) {
     v.faint_bg_color = CARD;
     v.code_bg_color = CARD_HOVER;
     v.window_stroke = Stroke::new(1.0_f32, BORDER);
-    v.window_rounding = Rounding::same(18.0);
-    v.menu_rounding = Rounding::same(12.0);
+    v.window_rounding = Rounding::same(22.0);
+    v.menu_rounding = Rounding::same(14.0);
     v.window_shadow = Shadow {
-        offset: vec2(0.0, 14.0),
-        blur: 34.0,
+        offset: vec2(0.0, 16.0),
+        blur: 38.0,
         spread: 0.0,
-        color: Color32::from_black_alpha(200),
+        color: Color32::from_black_alpha(205),
     };
     v.popup_shadow = Shadow {
-        offset: vec2(0.0, 8.0),
-        blur: 22.0,
+        offset: vec2(0.0, 9.0),
+        blur: 24.0,
         spread: 0.0,
-        color: Color32::from_black_alpha(170),
+        color: Color32::from_black_alpha(175),
     };
     v.selection.bg_fill = ACCENT_DIM;
     v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     v.hyperlink_color = ACCENT;
     v.slider_trailing_fill = true;
 
-    let r = Rounding::same(10.0);
+    let r = Rounding::same(12.0);
 
     v.widgets.noninteractive.bg_fill = CARD;
     v.widgets.noninteractive.weak_bg_fill = CARD;
@@ -110,14 +110,14 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(v);
 
     ctx.style_mut(|s| {
-        s.spacing.item_spacing = vec2(12.0, 11.0);
-        s.spacing.button_padding = vec2(16.0, 8.0);
-        s.spacing.interact_size.y = 34.0;
-        s.spacing.window_margin = Margin::same(20.0);
-        s.spacing.slider_width = 170.0;
+        s.spacing.item_spacing = vec2(13.0, 12.0);
+        s.spacing.button_padding = vec2(17.0, 9.0);
+        s.spacing.interact_size.y = 36.0;
+        s.spacing.window_margin = Margin::same(22.0);
+        s.spacing.slider_width = 180.0;
         s.spacing.combo_width = 230.0;
         s.text_styles = [
-            (TextStyle::Heading, FontId::new(30.0, FontFamily::Proportional)),
+            (TextStyle::Heading, FontId::new(34.0, FontFamily::Proportional)),
             (TextStyle::Body, FontId::new(15.0, FontFamily::Proportional)),
             (TextStyle::Button, FontId::new(14.5, FontFamily::Proportional)),
             (TextStyle::Small, FontId::new(12.5, FontFamily::Proportional)),
@@ -134,8 +134,8 @@ pub fn card() -> egui::Frame {
     egui::Frame::none()
         .fill(CARD)
         .stroke(Stroke::new(1.0_f32, BORDER))
-        .rounding(Rounding::same(15.0))
-        .inner_margin(Margin::symmetric(15.0, 11.0))
+        .rounding(Rounding::same(18.0))
+        .inner_margin(Margin::symmetric(16.0, 12.0))
 }
 
 /// A sound row card: quietly tinted while it is playing.
@@ -145,6 +145,24 @@ pub fn sound_card(playing: bool) -> egui::Frame {
         .stroke(Stroke::new(1.0_f32, if playing { ACCENT_DIM } else { BORDER }))
         .rounding(Rounding::same(16.0))
         .inner_margin(Margin::symmetric(15.0, 11.0))
+}
+
+/// A sound tile card: loudly tinted while it is playing.
+pub fn tile_card(playing: bool) -> egui::Frame {
+    egui::Frame::none()
+        .fill(if playing { ACCENT_FILL } else { CARD })
+        .stroke(Stroke::new(1.0_f32, if playing { ACCENT } else { BORDER }))
+        .rounding(Rounding::same(20.0))
+        .inner_margin(Margin::symmetric(15.0, 13.0))
+}
+
+/// A right-hand control-deck card.
+pub fn deck_card() -> egui::Frame {
+    egui::Frame::none()
+        .fill(CARD)
+        .stroke(Stroke::new(1.0_f32, BORDER))
+        .rounding(Rounding::same(20.0))
+        .inner_margin(Margin::symmetric(16.0, 13.0))
 }
 
 /// A soft inset field used for search and filters.
@@ -163,13 +181,13 @@ pub fn section_title(ui: &mut Ui, text: &str) {
 
 // ---- Text buttons ----------------------------------------------------------------------------
 
-/// Filled neon-green call-to-action button.
+/// Filled amber call-to-action button.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
         egui::Button::new(RichText::new(text).color(BG).strong())
             .fill(ACCENT)
             .stroke(Stroke::NONE)
-            .rounding(Rounding::same(9.0)),
+            .rounding(Rounding::same(12.0)),
     )
     .on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -180,7 +198,7 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
         egui::Button::new(RichText::new(text).color(TEXT))
             .fill(CARD_HOVER)
             .stroke(Stroke::new(1.0_f32, BORDER))
-            .rounding(Rounding::same(9.0)),
+            .rounding(Rounding::same(12.0)),
     )
     .on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -189,9 +207,9 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
 pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
         egui::Button::new(RichText::new(text).color(DANGER).strong())
-            .fill(Color32::from_rgb(0x2A, 0x12, 0x15))
-            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x5A, 0x24, 0x2B)))
-            .rounding(Rounding::same(9.0)),
+            .fill(Color32::from_rgb(0x3B, 0x1B, 0x1B))
+            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x6B, 0x2B, 0x2B)))
+            .rounding(Rounding::same(12.0)),
     )
     .on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -345,6 +363,62 @@ pub fn paint_icon(p: &egui::Painter, icon: Icon, c: Pos2, s: f32, color: Color32
             ));
         }
     }
+}
+
+/// Brand mark for the rail: a rounded equalizer glyph.
+pub fn brand_mark(p: &egui::Painter, rect: Rect) {
+    p.rect_filled(rect, Rounding::same(16.0), ACCENT_FILL);
+    p.rect_stroke(rect, Rounding::same(16.0), Stroke::new(1.0_f32, ACCENT_DIM));
+    let w = rect.width();
+    let h = rect.height();
+    let bars = [
+        (0.24, 0.34, ACCENT),
+        (0.42, 0.56, ACCENT_ALT),
+        (0.58, 0.44, ACCENT),
+        (0.76, 0.68, ACCENT_ALT),
+    ];
+    for (x_frac, h_frac, color) in bars {
+        let bw = w * 0.085;
+        let bh = h * h_frac;
+        let x = rect.left() + w * x_frac - bw / 2.0;
+        let y = rect.center().y - bh / 2.0;
+        p.rect_filled(
+            Rect::from_min_size(Pos2::new(x, y), vec2(bw, bh)),
+            Rounding::same(bw / 2.0),
+            color,
+        );
+    }
+}
+
+/// Rail navigation button with icon and tiny label.
+pub fn rail_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(68.0, 66.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let hovered = resp.hovered();
+        let p = ui.painter();
+        if selected {
+            p.rect_filled(rect, Rounding::same(18.0), ACCENT_FILL);
+            p.rect_stroke(rect, Rounding::same(18.0), Stroke::new(1.0_f32, ACCENT_DIM));
+        } else if hovered {
+            p.rect_filled(rect, Rounding::same(18.0), CARD);
+        }
+        let color = if selected {
+            ACCENT
+        } else if hovered {
+            TEXT
+        } else {
+            TEXT_DIM
+        };
+        paint_icon(p, icon, Pos2::new(rect.center().x, rect.top() + 24.0), 20.0, color);
+        p.text(
+            Pos2::new(rect.center().x, rect.bottom() - 8.0),
+            Align2::CENTER_BOTTOM,
+            label,
+            FontId::new(9.5, FontFamily::Proportional),
+            color,
+        );
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Flat, square icon button. `active` tints it with the accent color.
