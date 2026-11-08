@@ -8,7 +8,7 @@
 Free, open-source soundboard for voice chats, in the spirit of Soundpad: a sound library with
 global hotkeys, downloads via `soundpad://` links and a dual output — your headphones hear the
 sound, and the voice chat hears it through a second "microphone route". A desktop-first
-solar-obsidian interface — icon rail, sound-tile grid and a right-hand control deck —
+solar-obsidian interface — sidebar, sound-tile grid and a bottom player bar —
 no audio driver bundled or required, Windows and Linux support.
 
 [Русский перевод](README.ru.md)
@@ -63,8 +63,12 @@ no audio driver bundled or required, Windows and Linux support.
   action, pause/cancel, part-file cleanup, files never executed.
 - Interface in **Russian or English** (switch in Settings → Application; the whole UI is one
   language at a time, including error messages from the core modules).
-- Settings organized into cards, solar-obsidian theme with an icon rail, tile grid and
-  control deck, toasts instead of panics, keyboard-friendly focus handling.
+- Settings organized into cards, solar-obsidian theme with a sidebar, tile grid and
+  bottom player bar, toasts instead of panics, keyboard-friendly focus handling.
+- Discover page: legal free-music search (Creative Commons / public domain, Internet
+  Archive) with add-to-library and artist subscriptions.
+- Virtual output helper: download the free VB-CABLE (Windows) from the official site,
+  or create a built-in virtual sink on Linux — no driver ships inside VibeDrop.
 
 ## Windows: installation
 

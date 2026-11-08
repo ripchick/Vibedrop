@@ -1,8 +1,8 @@
 name: Release builds
 
-# Builds the release artifacts a maintainer can attach to a GitHub Release.
-# This workflow NEVER publishes: creating or publishing the release itself is a manual
-# action of the project owner (see packaging/README.md).
+# Builds the release artifacts and publishes a GitHub Release on tag pushes (v*).
+# The release itself is created by this workflow: push a tag such as v0.2.0 and the
+# Windows zip + Linux tarball are built, attached and published automatically.
 
 on:
   push:
@@ -33,10 +33,12 @@ jobs:
           Copy-Item README.md dist/ -ErrorAction SilentlyContinue
           Copy-Item LICENSE dist/ -ErrorAction SilentlyContinue
           Copy-Item CHANGELOG.md dist/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist/* -DestinationPath vibedrop-windows-x64.zip -Force
+          Get-ChildItem dist, vibedrop-windows-x64.zip | Select-Object Name, Length
       - uses: actions/upload-artifact@v4
         with:
           name: vibedrop-windows-x64
-          path: dist/*
+          path: vibedrop-windows-x64.zip
           if-no-files-found: error
 
   linux:
@@ -70,3 +72,24 @@ jobs:
   # Note: this binary needs the desktop libraries on the target system
   # (libasound2, libxkbcommon-x11 etc.); distro packages (packaging/) are the
   # supported installation path, not this artifact.
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vibedrop-windows-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: vibedrop-linux-x64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            vibedrop-windows-x64.zip
+            vibedrop-linux-x64.tar.gz
+          generate_release_notes: true
