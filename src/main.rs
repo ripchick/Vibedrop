@@ -34,7 +34,64 @@ fn init_logging(paths: &AppPaths) {
     }
 }
 
+/// Fluent look on Windows: Mica backdrop + dark title bar + rounded corners.
+/// eframe 0.29 has no window-effects API, so this applies DwmSetWindowAttribute on the
+/// window found by title from a short-lived watcher thread. Windows only; a no-op (via
+/// cfg) everywhere else.
+#[cfg(windows)]
+fn apply_windows_chrome() {
+    std::thread::spawn(|| unsafe {
+        use std::os::raw::{c_int, c_void};
+        #[link(name = "user32")]
+        extern "system" {
+            fn FindWindowW(class: *const u16, title: *const u16) -> isize;
+        }
+        #[link(name = "dwmapi")]
+        extern "system" {
+            fn DwmSetWindowAttribute(hwnd: isize, attr: u32, data: *const c_void, size: u32) -> i32;
+        }
+        const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+        const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
+        const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+        let title: Vec<u16> = "VibeDrop".encode_utf16().chain(std::iter::once(0)).collect();
+        let mut hwnd: isize = 0;
+        for _ in 0..200 {
+            hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+            if hwnd != 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if hwnd == 0 {
+            return;
+        }
+        let dark: c_int = 1;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &dark as *const c_int as *const c_void,
+            std::mem::size_of::<c_int>() as u32,
+        );
+        let mica: c_int = 2; // DWMSBT_MAINWINDOW
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            &mica as *const c_int as *const c_void,
+            std::mem::size_of::<c_int>() as u32,
+        );
+        let round: c_int = 2; // DWMWCP_ROUND
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &round as *const c_int as *const c_void,
+            std::mem::size_of::<c_int>() as u32,
+        );
+    });
+}
+
 fn main() -> eframe::Result<()> {
+    #[cfg(windows)]
+    apply_windows_chrome();
     let mut notices: Vec<String> = Vec::new();
 
     let paths = match AppPaths::discover() {

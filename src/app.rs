@@ -31,6 +31,7 @@ use crate::system::{self, ProtocolState, WakeHook};
 use crate::theme::{self, Icon};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui::{self, vec2, Align, Align2, Color32, Key, Layout, RichText, Rounding, Sense, Stroke, Ui};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -1560,6 +1561,28 @@ impl VibeDropApp {
             if !favorites_only {
                 if theme::primary_button(ui, lang::t(&lang, "Add from URL")).clicked() {
                     want_url = true;
+                }
+                // Music sites: open the official search in the browser. Downloading
+                // copyrighted music from these services is not possible (and illegal);
+                // "Add from URL" stays for direct files the user has rights to.
+                let query = self.search.trim().to_string();
+                let query = if query.is_empty() { "music".to_string() } else { query };
+                let encoded = utf8_percent_encode(&query, NON_ALPHANUMERIC);
+                if theme::secondary_button(ui, "Spotify")
+                    .on_hover_text(lang::t(&lang, "Open Spotify search in the browser"))
+                    .clicked()
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!(
+                        "https://open.spotify.com/search/{encoded}"
+                    )));
+                }
+                if theme::secondary_button(ui, "SoundCloud")
+                    .on_hover_text(lang::t(&lang, "Open SoundCloud search in the browser"))
+                    .clicked()
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!(
+                        "https://soundcloud.com/search?q={encoded}"
+                    )));
                 }
                 if theme::secondary_button(ui, lang::t(&lang, "Import")).clicked() {
                     want_import = true;

@@ -1,44 +1,44 @@
-//! Central visual identity of VibeDrop: CHARCOAL x BLUE (soundboard classic).
+//! Central visual identity of VibeDrop: DARK FLUENT (Windows-style, Soundpad layout).
 //!
 //! All colors live here. `apply` installs the palette into egui, and the helpers below draw
 //! buttons, cards and icons that match it. Icons are painted with shapes (not font glyphs), so
 //! they look the same on every machine and never turn into "tofu" boxes.
 
 use eframe::egui::{
-    self, epaint::Shadow, vec2, Align2, Color32, CursorIcon, FontFamily, FontId, Margin, Pos2, Rect, Response,
-    RichText, Rounding, Sense, Shape, Stroke, TextStyle, Ui,
+    self, epaint::Shadow, vec2, Align2, Color32, CursorIcon, FontData, FontDefinitions, FontFamily, FontId, Margin,
+    Pos2, Rect, Response, RichText, Rounding, Sense, Shape, Stroke, TextStyle, Ui,
 };
 
 // ---- Palette ---------------------------------------------------------------------------------
 
-/// Window / page background `#141414`.
-pub const BG: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
-/// Cards and panels `#1E1E1E`.
-pub const CARD: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
+/// Window / page background `#202020` (Win11 dark base).
+pub const BG: Color32 = Color32::from_rgb(0x20, 0x20, 0x20);
+/// Cards and panels `#2B2B2B`.
+pub const CARD: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
 /// Card under the pointer.
-pub const CARD_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2A, 0x2A);
-/// Rail / deck background, a touch darker than the cards.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x19, 0x19, 0x19);
+pub const CARD_HOVER: Color32 = Color32::from_rgb(0x34, 0x34, 0x34);
+/// Menubar / transport / bottom bar, a touch darker than the cards.
+pub const SIDEBAR: Color32 = Color32::from_rgb(0x1B, 0x1B, 0x1B);
 /// Input fields and slider rails.
-pub const INPUT_BG: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);
-/// Primary accent `#4DA3FF` (soundboard blue).
-pub const ACCENT: Color32 = Color32::from_rgb(0x4D, 0xA3, 0xFF);
+pub const INPUT_BG: Color32 = Color32::from_rgb(0x2A, 0x2A, 0x2A);
+/// Primary accent `#4CC2FF` (Windows dark-mode default accent).
+pub const ACCENT: Color32 = Color32::from_rgb(0x4C, 0xC2, 0xFF);
 /// Accent on hover (slightly lighter).
-pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x6F, 0xB6, 0xFF);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x6B, 0xDB, 0xFF);
 /// Muted accent for secondary strokes.
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2E, 0x6B, 0xC2);
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2A, 0x6B, 0xA8);
 /// Dark blue tint used behind selected / hovered accent elements.
-pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x1D, 0x2D, 0x42);
+pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x1B, 0x3A, 0x52);
 /// Secondary accent for highlights and the brand mark.
 pub const ACCENT_ALT: Color32 = Color32::from_rgb(0x7C, 0xF0, 0xD4);
-/// Borders `#333333`.
-pub const BORDER: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
-/// Main text `#EDEDED`.
-pub const TEXT: Color32 = Color32::from_rgb(0xED, 0xED, 0xED);
+/// Borders `#2E2E2E`.
+pub const BORDER: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2E);
+/// Main text `#FFFFFF`.
+pub const TEXT: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xFF);
 /// Secondary text.
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0xA9, 0xA9, 0xA9);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0xC8, 0xC8, 0xC8);
 /// Disabled text and icons.
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8A, 0x8A, 0x8A);
 /// Errors and destructive actions.
 pub const DANGER: Color32 = Color32::from_rgb(0xFF, 0x6B, 0x6B);
 /// Warnings.
@@ -56,8 +56,8 @@ pub fn apply(ctx: &egui::Context) {
     v.faint_bg_color = CARD;
     v.code_bg_color = CARD_HOVER;
     v.window_stroke = Stroke::new(1.0_f32, BORDER);
-    v.window_rounding = Rounding::same(22.0);
-    v.menu_rounding = Rounding::same(14.0);
+    v.window_rounding = Rounding::same(10.0);
+    v.menu_rounding = Rounding::same(8.0);
     v.window_shadow = Shadow {
         offset: vec2(0.0, 16.0),
         blur: 38.0,
@@ -75,7 +75,7 @@ pub fn apply(ctx: &egui::Context) {
     v.hyperlink_color = ACCENT;
     v.slider_trailing_fill = true;
 
-    let r = Rounding::same(12.0);
+    let r = Rounding::same(6.0);
 
     v.widgets.noninteractive.bg_fill = CARD;
     v.widgets.noninteractive.weak_bg_fill = CARD;
@@ -109,6 +109,9 @@ pub fn apply(ctx: &egui::Context) {
 
     ctx.set_visuals(v);
 
+    // Fluent look: use the system UI font (Segoe UI on Windows) when available.
+    load_system_font(ctx);
+
     ctx.style_mut(|s| {
         s.spacing.item_spacing = vec2(13.0, 12.0);
         s.spacing.button_padding = vec2(17.0, 9.0);
@@ -129,12 +132,30 @@ pub fn apply(ctx: &egui::Context) {
 
 // ---- Frames ----------------------------------------------------------------------------------
 
+/// Fluent look: prefer the system UI font (Segoe UI on Windows). Falls back silently.
+fn load_system_font(ctx: &egui::Context) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    let path = std::path::Path::new(r"C:\Windows\Fonts\segoeui.ttf");
+    let Ok(bytes) = std::fs::read(path) else {
+        return;
+    };
+    let bytes: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert("segoe".to_owned(), FontData::from_static(bytes));
+    if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+        family.insert(0, "segoe".to_owned());
+    }
+    ctx.set_fonts(fonts);
+}
+
 /// A rounded card with a thin border.
 pub fn card() -> egui::Frame {
     egui::Frame::none()
         .fill(CARD)
         .stroke(Stroke::new(1.0_f32, BORDER))
-        .rounding(Rounding::same(18.0))
+        .rounding(Rounding::same(8.0))
         .inner_margin(Margin::symmetric(16.0, 12.0))
 }
 
@@ -143,7 +164,7 @@ pub fn sound_card(playing: bool) -> egui::Frame {
     egui::Frame::none()
         .fill(if playing { ACCENT_FILL } else { CARD })
         .stroke(Stroke::new(1.0_f32, if playing { ACCENT_DIM } else { BORDER }))
-        .rounding(Rounding::same(16.0))
+        .rounding(Rounding::same(8.0))
         .inner_margin(Margin::symmetric(15.0, 11.0))
 }
 
@@ -170,7 +191,7 @@ pub fn inset() -> egui::Frame {
     egui::Frame::none()
         .fill(INPUT_BG)
         .stroke(Stroke::new(1.0_f32, BORDER))
-        .rounding(Rounding::same(13.0))
+        .rounding(Rounding::same(6.0))
         .inner_margin(Margin::symmetric(13.0, 7.0))
 }
 

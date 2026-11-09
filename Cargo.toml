@@ -1,6 +1,6 @@
 [package]
 name = "vibedrop"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "VibeDrop - a free open-source soundboard with dual audio output"
 license = "Apache-2.0"

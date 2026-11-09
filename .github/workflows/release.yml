@@ -73,11 +73,34 @@ jobs:
   # (libasound2, libxkbcommon-x11 etc.); distro packages (packaging/) are the
   # supported installation path, not this artifact.
 
+  macos:
+    name: macOS release build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-release
+      - name: cargo build --release
+        run: cargo build --release --locked
+      - name: Stage release files
+        run: |
+          mkdir -p dist
+          cp target/release/vibedrop dist/vibedrop
+          cp README.md LICENSE CHANGELOG.md dist/
+          tar -czf vibedrop-macos-arm64.tar.gz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibedrop-macos-arm64
+          path: vibedrop-macos-arm64.tar.gz
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
     permissions:
       contents: write
     steps:
@@ -87,13 +110,17 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: vibedrop-linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: vibedrop-macos-arm64
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             vibedrop-windows-x64.zip
             vibedrop-linux-x64.tar.gz
+            vibedrop-macos-arm64.tar.gz
           body: |
-            VibeDrop soundboard — desktop (Windows/Linux), Rust.
+            VibeDrop soundboard — desktop (Windows, Linux, macOS), Rust.
             See `README.md` / `README.ru.md` for details.
 
             Optional free virtual cable for voice chats (Windows):
