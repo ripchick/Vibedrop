@@ -25,10 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install NDK
-        uses: nttld/setup-ndk@v2
-        with:
-          ndk-version: r26
+      - name: Install NDK (Android SDK)
+        run: |
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'ndk;26.3.11579264' 'platforms;android-34' 'build-tools;34.0.0'
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -42,7 +45,6 @@ jobs:
 
       - name: cargo check for Android
         run: |
-          export NDK_HOME="${ANDROID_NDK_HOME:-$NDK_HOME}"
           export CC_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
           export CXX_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
           cargo check --lib --target aarch64-linux-android --locked
