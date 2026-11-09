@@ -81,17 +81,25 @@ enum Page {
     Library,
     Favorites,
     History,
+    Friends,
     Settings,
 }
 
 impl Page {
-    const ALL: [Page; 4] = [Page::Library, Page::Favorites, Page::History, Page::Settings];
+    const ALL: [Page; 5] = [
+        Page::Library,
+        Page::Favorites,
+        Page::History,
+        Page::Friends,
+        Page::Settings,
+    ];
 
     fn title(self) -> &'static str {
         match self {
             Page::Library => "Library",
             Page::Favorites => "Favorites",
             Page::History => "History",
+            Page::Friends => "Friends",
             Page::Settings => "Settings",
         }
     }
@@ -101,6 +109,7 @@ impl Page {
             Page::Library => Icon::Library,
             Page::Favorites => Icon::Star,
             Page::History => Icon::History,
+            Page::Friends => Icon::Volume,
             Page::Settings => Icon::Settings,
         }
     }
@@ -229,6 +238,10 @@ pub struct VibeDropApp {
     helper_rx: Receiver<HelperMsg>,
     helper_tx: Sender<HelperMsg>,
 
+    discord: crate::discord::DiscordPresence,
+    share: crate::netshare::ShareHandle,
+    peers: Vec<crate::netshare::PeerInfo>,
+
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
     url_dialog: Option<UrlDialog>,
@@ -277,6 +290,12 @@ impl VibeDropApp {
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
         let (helper_tx, helper_rx) = unbounded::<HelperMsg>();
+        let share = crate::netshare::start(
+            settings.display_name.clone(),
+            settings.allow_share_requests,
+            paths.sounds_dir.clone(),
+        );
+        let discord = crate::discord::DiscordPresence::start();
         let missing: HashSet<String> = library
             .entries
             .iter()
@@ -312,6 +331,9 @@ impl VibeDropApp {
             dl_rx,
             helper_rx,
             helper_tx,
+            discord,
+            share,
+            peers: Vec::new(),
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -1514,6 +1536,13 @@ impl VibeDropApp {
                             .size(12.5)
                             .color(theme::TEXT_DIM),
                     );
+                    if self.discord.status() == crate::discord::DiscordStatus::Connected {
+                        ui.label(
+                            RichText::new(format!("Discord: {}", lang::t(&lang, "connected")))
+                                .size(12.5)
+                                .color(theme::ACCENT),
+                        );
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::danger_button(ui, lang::t(&lang, "Stop All")).clicked() {
                             stop_all = true;
@@ -1654,6 +1683,7 @@ impl VibeDropApp {
                 match self.page {
                     Page::Library | Page::Favorites => self.draw_sound_page(ui),
                     Page::History => self.draw_history_page(ui),
+                    Page::Friends => self.draw_friends_page(ui),
                     Page::Settings => self.draw_settings_page(ui),
                 }
             });
@@ -2061,6 +2091,170 @@ impl VibeDropApp {
             }
             Action::Relink(id) => self.relink_sound(&id),
             Action::ExtractAudio(id) => self.extract_audio(&id),
+        }
+    }
+
+    // ---- Presence: Discord Rich Presence + local sound sharing --------------------------------
+
+    /// Push the current playback state to Discord and to LAN peers (cheap, runs every frame).
+    fn sync_presence(&mut self) {
+        let now_name = self
+            .now_playing
+            .as_deref()
+            .and_then(|id| self.library.get(id))
+            .map(|e| e.name.clone());
+        let playing = self.now_playing.as_deref().is_some_and(|id| self.engine.is_playing(id));
+        let progress = self.now_playing.as_deref().and_then(|id| self.engine.progress(id));
+        let (details, state, started) = match (&now_name, playing, progress) {
+            (Some(name), true, Some((pos, total))) => {
+                let state = if total > 0.0 {
+                    format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total))
+                } else {
+                    theme::fmt_time(pos)
+                };
+                let started = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                (Some(name.clone()), Some(state), Some(started))
+            }
+            (Some(name), _, _) => (Some(name.clone()), None, None),
+            (None, _, _) => (None, None, None),
+        };
+        self.discord.set(details, state, started);
+        self.share.set_now_playing(now_name);
+    }
+
+    fn poll_share(&mut self) {
+        while let Some(msg) = self.share.poll() {
+            match msg {
+                crate::netshare::ShareMsg::Peers(list) => self.peers = list,
+                crate::netshare::ShareMsg::IncomingRequest { addr, sound } => {
+                    let file = if self.settings.allow_share_requests {
+                        self.library
+                            .search(&sound)
+                            .into_iter()
+                            .find(|e| e.name == sound)
+                            .map(|e| e.path.clone())
+                    } else {
+                        None
+                    };
+                    self.share.respond(addr, file);
+                }
+                crate::netshare::ShareMsg::ReceivedFile { name, path } => {
+                    match import_file(&path, None, ImportSource::Local) {
+                        Ok(entry) => {
+                            self.library.add_entry(entry);
+                            self.library_dirty = true;
+                            self.sync_index();
+                            let lang = self.settings.language.clone();
+                            let text = if lang::ru(&lang) {
+                                format!("Получен звук от друга: {name}")
+                            } else {
+                                format!("Borrowed sound from a friend: {name}")
+                            };
+                            self.toast(ToastKind::Success, text);
+                        }
+                        Err(e) => self.toast(ToastKind::Error, lang::tx(&self.settings.language, &e.to_string())),
+                    }
+                }
+                crate::netshare::ShareMsg::Note(note) => self.toast(ToastKind::Info, note),
+            }
+        }
+    }
+
+    // ---- Drawing: friends (LAN sound sharing) ------------------------------------------------
+
+    fn draw_friends_page(&mut self, ui: &mut Ui) {
+        let lang = self.settings.language.clone();
+        let mut borrow: Option<(std::net::SocketAddr, String)> = None;
+        page_header(
+            ui,
+            lang::t(&lang, "Friends"),
+            lang::t(&lang, "Share sounds with VibeDrop on your local network"),
+            |_ui| {},
+        );
+        ui.add_space(12.0);
+
+        theme::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_title(ui, lang::t(&lang, "YOUR NAME"));
+            ui.horizontal(|ui| {
+                let mut name = self.settings.display_name.clone();
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut name)
+                        .hint_text("VibeDrop user")
+                        .desired_width(240.0),
+                );
+                if resp.lost_focus() && name.trim() != self.settings.display_name {
+                    self.settings.display_name = name.trim().to_string();
+                    self.settings_dirty = true;
+                    self.share.set_name(self.settings.display_name.clone());
+                }
+            });
+            ui.add_space(6.0);
+            let mut allow = self.settings.allow_share_requests;
+            if ui.checkbox(&mut allow, lang::t(&lang, "Allow sound requests from the network")).changed() {
+                self.settings.allow_share_requests = allow;
+                self.settings_dirty = true;
+                self.share.set_allow(allow);
+            }
+            ui.label(
+                RichText::new(lang::t(
+                    &lang,
+                    "Only VibeDrop apps on the same local network see each other. Borrowed sounds are copied directly between the machines — no server involved.",
+                ))
+                .size(12.5)
+                .color(theme::TEXT_FAINT),
+            );
+        });
+
+        ui.add_space(10.0);
+        theme::section_title(ui, lang::t(&lang, "PEOPLE AROUND"));
+        if self.peers.is_empty() {
+            ui.label(
+                RichText::new(lang::t(
+                    &lang,
+                    "Nobody here yet. Open VibeDrop on another machine in the same network.",
+                ))
+                .color(theme::TEXT_DIM),
+            );
+        } else {
+            let peers = self.peers.clone();
+            ui.push_id("friends_scroll", |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    for peer in peers {
+                        theme::card().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&peer.name).strong().color(theme::TEXT));
+                                    let info = match &peer.now_playing {
+                                        Some(sound) => {
+                                            if lang::ru(&lang) {
+                                                format!("Слушает: {sound}")
+                                            } else {
+                                                format!("Now playing: {sound}")
+                                            }
+                                        }
+                                        None => lang::t(&lang, "Idle").to_string(),
+                                    };
+                                    ui.label(RichText::new(info).size(12.5).color(theme::TEXT_DIM));
+                                });
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if let Some(sound) = &peer.now_playing {
+                                        if theme::secondary_button(ui, lang::t(&lang, "Borrow")).clicked() {
+                                            borrow = Some((peer.addr, sound.clone()));
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                    }
+                });
+            });
+        }
+        if let Some((addr, sound)) = borrow {
+            self.share.request(addr, sound);
+            self.toast(ToastKind::Info, lang::t(&lang, "Request sent"));
         }
     }
 
@@ -3566,6 +3760,8 @@ impl eframe::App for VibeDropApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_events(ctx);
         self.handle_close(ctx);
+        self.sync_presence();
+        self.poll_share();
 
         self.draw_menubar(ctx);
         self.draw_transport(ctx);
