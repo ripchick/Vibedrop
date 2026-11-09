@@ -46,8 +46,6 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Plays" => "Воспроизведений",
         "My sounds" => "Мои звуки",
         "Name" => "Название",
-        "Open Spotify search in the browser" => "Открыть поиск Spotify в браузере",
-        "Open SoundCloud search in the browser" => "Открыть поиск SoundCloud в браузере",
         // Virtual output (free driver helper).
         "VIRTUAL OUTPUT (FREE)" => "ВИРТУАЛЬНЫЙ ВЫХОД (БЕСПЛАТНО)",
         "Windows needs a virtual cable for voice chats; VB-CABLE is freeware from the official site. On Linux, VibeDrop creates a built-in virtual sink with no driver at all." => "Для голосовых чатов в Windows нужен виртуальный кабель; VB-CABLE — бесплатная программа с официального сайта. В Linux VibeDrop создаёт встроенный виртуальный выход вообще без драйвера.",

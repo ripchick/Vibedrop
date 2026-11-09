@@ -1,0 +1,48 @@
+name: Android compile check (experimental)
+
+# Proves the code compiles for Android (aarch64) with the NDK present, and lists the
+# remaining packaging work. This job does NOT publish an APK: the APK runtime glue
+# (android_main + winit EventLoop with AndroidApp) is not part of eframe 0.29's
+# run_native and must be implemented + tested on a real device (see README).
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: cargo check (aarch64-linux-android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NDK
+        uses: nttld/setup-ndk@v2
+        with:
+          ndk-version: r26
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-check
+
+      - name: cargo check for Android
+        run: |
+          export NDK_HOME="${ANDROID_NDK_HOME:-$NDK_HOME}"
+          export CC_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          export CXX_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
+          cargo check --lib --target aarch64-linux-android --locked

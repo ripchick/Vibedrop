@@ -3,7 +3,7 @@
 ![CI](https://github.com/ripchick/Vibedrop/actions/workflows/ci.yml/badge.svg)
 [![Лицензия: Apache-2.0](https://img.shields.io/badge/Лицензия-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
-[![Платформа](https://img.shields.io/badge/Платформа-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
+[![Платформа](https://img.shields.io/badge/Платформа-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-lightgrey.svg)](#)
 
 [English](README.md)
 
@@ -73,8 +73,6 @@ Soundpad: библиотека звуков с глобальными горяч
   на одном языке за раз, включая сообщения об ошибках из ядерных модулей).
 - Настройки, организованные в карточки, тёмный Fluent-стиль (Segoe UI) с сайдбаром,
   таблицей звуков и панелью плеера, тосты вместо паник, удобная работа с клавиатуры.
-- Страница «Обзор»: поиск бесплатной музыки (только Creative Commons и общественное
-  достояние, Интернет-архив) с добавлением в библиотеку и подпиской на авторов.
 
 ## Windows: установка
 
@@ -117,6 +115,18 @@ xattr -d com.apple.quarantine vibedrop
 для приложения (System Settings → Privacy & Security → Accessibility) — без него
 приложение просто сообщит, что хоткеи недоступны. Данные лежат в
 `~/Library/Application Support/`. Регистрация ссылок `soundpad://` на macOS пока не настроена.
+
+## Android: статус (экспериментально)
+
+VibeDrop готов к Android на уровне кода: приложение компилируется под
+`aarch64-linux-android` (доказано workflow «Android compile check»), а интерфейс
+адаптируется под телефоны (сайдбар превращается в верхнюю полосу на узких экранах).
+Сам APK пока требует кастомную точку входа: `eframe::run_native` (0.29) не может создать
+Android-событийный цикл (winit требует `AndroidApp` из `android_main()`), и это нужно
+реализовывать и тестировать на реальном устройстве. Подробности, scaffold и команды
+упаковки — в [`android/README.md`](android/README.md). На Android недоступны по дизайну:
+глобальные хоткеи, регистрация `soundpad://` и импорт через файловый диалог; воспроизводятся
+библиотека, загрузки по ссылкам и настройки.
 
 ## Сборка из исходников
 

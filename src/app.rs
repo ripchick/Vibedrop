@@ -31,7 +31,6 @@ use crate::system::{self, ProtocolState, WakeHook};
 use crate::theme::{self, Icon};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui::{self, vec2, Align, Align2, Color32, Key, Layout, RichText, Rounding, Sense, Stroke, Ui};
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -321,7 +320,10 @@ impl VibeDropApp {
             shut_down: false,
         };
         app.sync_index();
+        #[cfg(not(target_os = "android"))]
         app.init_hotkeys(hk_tx);
+        #[cfg(target_os = "android")]
+        drop(hk_tx);
         for notice in notices {
             app.toast(ToastKind::Error, lang::tx(&app.settings.language, &notice));
         }
@@ -632,12 +634,26 @@ impl VibeDropApp {
     }
 
     fn pick_and_import(&mut self) {
-        let picked = rfd::FileDialog::new()
-            .set_title(lang::t(&self.settings.language, "Import sounds"))
-            .add_filter(lang::t(&self.settings.language, "Audio (WAV, MP3)"), &["wav", "mp3"])
-            .pick_files();
-        if let Some(files) = picked {
-            self.import_paths(files);
+        #[cfg(target_os = "android")]
+        {
+            self.toast(
+                ToastKind::Info,
+                lang::t(
+                    &self.settings.language,
+                    "File import is not available on this platform yet.",
+                ),
+            );
+            return;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let picked = rfd::FileDialog::new()
+                .set_title(lang::t(&self.settings.language, "Import sounds"))
+                .add_filter(lang::t(&self.settings.language, "Audio (WAV, MP3)"), &["wav", "mp3"])
+                .pick_files();
+            if let Some(files) = picked {
+                self.import_paths(files);
+            }
         }
     }
 
@@ -705,30 +721,45 @@ impl VibeDropApp {
 
     /// Let the user point a library entry at a new file (for example after moving it).
     fn relink_sound(&mut self, id: &str) {
-        let Some(picked) = rfd::FileDialog::new()
-            .set_title(lang::t(&self.settings.language, "Locate the sound file"))
-            .add_filter(lang::t(&self.settings.language, "Audio (WAV, MP3)"), &["wav", "mp3"])
-            .pick_file()
-        else {
-            return;
-        };
-        if let Err(e) = validate_audio_file(&picked) {
-            self.toast(ToastKind::Error, lang::tx(&self.settings.language, &e.to_string()));
+        #[cfg(target_os = "android")]
+        {
+            let _ = id;
+            self.toast(
+                ToastKind::Info,
+                lang::t(
+                    &self.settings.language,
+                    "File import is not available on this platform yet.",
+                ),
+            );
             return;
         }
-        let hash = file_fingerprint(&picked).ok();
-        if let Some(e) = self.library.get_mut(id) {
-            e.path = picked.clone();
-            e.duration_secs = None;
-            if hash.is_some() {
-                e.content_hash = hash;
+        #[cfg(not(target_os = "android"))]
+        {
+            let Some(picked) = rfd::FileDialog::new()
+                .set_title(lang::t(&self.settings.language, "Locate the sound file"))
+                .add_filter(lang::t(&self.settings.language, "Audio (WAV, MP3)"), &["wav", "mp3"])
+                .pick_file()
+            else {
+                return;
+            };
+            if let Err(e) = validate_audio_file(&picked) {
+                self.toast(ToastKind::Error, lang::tx(&self.settings.language, &e.to_string()));
+                return;
             }
+            let hash = file_fingerprint(&picked).ok();
+            if let Some(e) = self.library.get_mut(id) {
+                e.path = picked.clone();
+                e.duration_secs = None;
+                if hash.is_some() {
+                    e.content_hash = hash;
+                }
+            }
+            self.missing.remove(id);
+            self.engine.preload(id, &picked);
+            self.save_library();
+            self.sync_index();
+            self.toast(ToastKind::Success, lang::t(&self.settings.language, "File linked"));
         }
-        self.missing.remove(id);
-        self.engine.preload(id, &picked);
-        self.save_library();
-        self.sync_index();
-        self.toast(ToastKind::Success, lang::t(&self.settings.language, "File linked"));
     }
 
     /// Hotkeys of sounds and the microphone-mute hotkey share one namespace.
@@ -1143,6 +1174,60 @@ impl VibeDropApp {
 
     fn draw_sidebar(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
+        // Compact phone layout: narrow windows get a horizontal top strip instead of the rail.
+        let narrow = ctx.input(|i| i.screen_rect.width()) < 700.0;
+        if narrow {
+            let mut go_page: Option<Page> = None;
+            let mut want_quit = false;
+            egui::TopBottomPanel::top("categories-top")
+                .resizable(false)
+                .frame(
+                    egui::Frame::none()
+                        .fill(theme::SIDEBAR)
+                        .stroke(Stroke::new(1.0_f32, theme::BORDER))
+                        .inner_margin(egui::Margin::symmetric(8.0, 6.0)),
+                )
+                .show(ctx, |ui| {
+                    egui::ScrollArea::horizontal()
+                        .auto_shrink([true, false])
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let (mark, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                                theme::brand_mark(ui.painter(), mark);
+                                for page in Page::ALL {
+                                    let label = if page == Page::Library {
+                                        lang::t(&lang, "My sounds")
+                                    } else {
+                                        lang::t(&lang, page.title())
+                                    };
+                                    if theme::rail_button(ui, page.icon(), label, self.page == page)
+                                        .on_hover_text(lang::t(&lang, page.title()))
+                                        .clicked()
+                                    {
+                                        go_page = Some(page);
+                                    }
+                                }
+                                if theme::icon_button(ui, Icon::Quit, 17.0, false)
+                                    .on_hover_text(lang::t(&lang, "Quit VibeDrop"))
+                                    .clicked()
+                                {
+                                    want_quit = true;
+                                }
+                            });
+                        });
+                });
+            if let Some(page) = go_page {
+                self.page = page;
+                if page == Page::Settings {
+                    self.protocol_state = system::protocol_state();
+                }
+            }
+            if want_quit {
+                self.quitting = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
         egui::SidePanel::left("sidebar")
             .exact_width(204.0)
             .resizable(false)
@@ -1561,28 +1646,6 @@ impl VibeDropApp {
             if !favorites_only {
                 if theme::primary_button(ui, lang::t(&lang, "Add from URL")).clicked() {
                     want_url = true;
-                }
-                // Music sites: open the official search in the browser. Downloading
-                // copyrighted music from these services is not possible (and illegal);
-                // "Add from URL" stays for direct files the user has rights to.
-                let query = self.search.trim().to_string();
-                let query = if query.is_empty() { "music".to_string() } else { query };
-                let encoded = utf8_percent_encode(&query, NON_ALPHANUMERIC);
-                if theme::secondary_button(ui, "Spotify")
-                    .on_hover_text(lang::t(&lang, "Open Spotify search in the browser"))
-                    .clicked()
-                {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!(
-                        "https://open.spotify.com/search/{encoded}"
-                    )));
-                }
-                if theme::secondary_button(ui, "SoundCloud")
-                    .on_hover_text(lang::t(&lang, "Open SoundCloud search in the browser"))
-                    .clicked()
-                {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!(
-                        "https://soundcloud.com/search?q={encoded}"
-                    )));
                 }
                 if theme::secondary_button(ui, lang::t(&lang, "Import")).clicked() {
                     want_import = true;

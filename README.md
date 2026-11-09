@@ -3,7 +3,7 @@
 ![CI](https://github.com/ripchick/Vibedrop/actions/workflows/ci.yml/badge.svg)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-lightgrey.svg)](#)
 
 Free, open-source soundboard for voice chats, in the spirit of Soundpad: a sound library with
 global hotkeys, downloads via `soundpad://` links and a dual output — your headphones hear the
@@ -66,8 +66,6 @@ support.
   language at a time, including error messages from the core modules).
 - Settings organized into cards, dark Fluent look (Segoe UI, Windows-style) with a sidebar,
   sound table and player bar, toasts instead of panics, keyboard-friendly focus handling.
-- Discover page: legal free-music search (Creative Commons / public domain, Internet
-  Archive) with add-to-library and artist subscriptions.
 - Virtual output helper: download the free VB-CABLE (Windows) from the official site,
   or create a built-in virtual sink on Linux — no driver ships inside VibeDrop.
 
@@ -108,6 +106,18 @@ Then run `./vibedrop`. Global hotkeys on macOS need Accessibility permission for
 (System Settings → Privacy & Security → Accessibility) — without it the app simply
 reports that hotkeys are unavailable. Data lives in `~/Library/Application Support/`.
 Soundpad-style `soundpad://` link registration is not wired up on macOS yet.
+
+## Android: status (experimental)
+
+VibeDrop is Android-ready: the app code compiles for `aarch64-linux-android`
+(proven by the `Android compile check` workflow) and the UI adapts to phones
+(the category sidebar becomes a top strip on narrow screens). The APK itself still
+needs the custom entry point: eframe 0.29's `run_native` cannot create the Android
+event loop (winit requires an `AndroidApp` from `android_main()`), and that glue must
+be tested on a real device. See [`android/README.md`](android/README.md) for the
+scaffold, the build commands and exactly what is left. Not available on Android by
+design: global hotkeys, `soundpad://` registration and file-picker import; playback,
+the library, URL downloads and settings work.
 
 ## Building from source
 
