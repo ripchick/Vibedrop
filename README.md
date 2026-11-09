@@ -49,10 +49,12 @@ support.
 
 ## Features
 
+- Supported audio formats: **WAV**, **MP3** and **MP4/MOV/M4A** (via `symphonia`
+  including AAC/ALAC decode). For video files the audio track plays; use
+  "Extract audio to WAV" in a sound's ••• menu to save the sound as a separate WAV.
+  Sounds are capped at 5 minutes.
 - Sound library: add/remove/rename/search/sort sounds, favourites, duplicates detection,
   durations; errors for missing/damaged files stay visible, and the library survives restarts.
-- Supported audio formats: **WAV** and **MP3** (via `symphonia`), the same formats the decoder
-  uses for playback and preview.
 - Global hotkeys: per-sound assignment, re-binding/removal, conflict detection, an explicit
   mic-mute hotkey, messages when a combination cannot be registered, released on exit
   (`global-hotkey` crate; on Linux registration depends on the desktop environment — see

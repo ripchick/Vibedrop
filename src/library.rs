@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 pub enum AudioFormat {
     Wav,
     Mp3,
+    Mp4,
 }
 
 impl AudioFormat {
@@ -20,6 +21,7 @@ impl AudioFormat {
         match self {
             AudioFormat::Wav => "wav",
             AudioFormat::Mp3 => "mp3",
+            AudioFormat::Mp4 => "mp4",
         }
     }
 
@@ -27,6 +29,7 @@ impl AudioFormat {
         match ext.to_ascii_lowercase().as_str() {
             "wav" => Some(AudioFormat::Wav),
             "mp3" => Some(AudioFormat::Mp3),
+            "mp4" | "m4a" | "mov" => Some(AudioFormat::Mp4),
             _ => None,
         }
     }
@@ -47,6 +50,10 @@ impl AudioFormat {
             && head[1] & 0x06 != 0x00
         {
             return Some(AudioFormat::Mp3);
+        }
+        // ISO Base Media (MP4/MOV/M4A): a `ftyp` box at offset 4.
+        if head.len() >= 12 && &head[4..8] == b"ftyp" {
+            return Some(AudioFormat::Mp4);
         }
         None
     }
@@ -329,7 +336,7 @@ pub fn file_fingerprint(path: &Path) -> io::Result<u64> {
     Ok(hash)
 }
 
-/// Check that `src` is a non-empty WAV or MP3 file (by extension and by content).
+/// Check that `src` is a non-empty WAV, MP3 or MP4 file (by extension and by content).
 pub fn validate_audio_file(src: &Path) -> Result<AudioFormat, LibraryError> {
     let meta = fs::metadata(src).map_err(|e| io_error(src, e))?;
     if !meta.is_file() {
@@ -345,7 +352,7 @@ pub fn validate_audio_file(src: &Path) -> Result<AudioFormat, LibraryError> {
         .and_then(|mut f| f.read(&mut head))
         .map_err(|e| io_error(src, e))?;
     AudioFormat::sniff(&head[..n])
-        .ok_or_else(|| LibraryError::UnsupportedFormat("content is not WAV or MP3".to_string()))
+        .ok_or_else(|| LibraryError::UnsupportedFormat("content is not WAV, MP3 or MP4".to_string()))
 }
 
 /// Create a library entry for a local audio file. With `managed_dir`, the file is copied there

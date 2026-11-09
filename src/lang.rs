@@ -46,6 +46,8 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Plays" => "Воспроизведений",
         "My sounds" => "Мои звуки",
         "Name" => "Название",
+        "Audio & video (WAV, MP3, MP4)" => "Аудио и видео (WAV, MP3, MP4)",
+        "Extract audio to WAV" => "Извлечь звук в WAV",
         // Virtual output (free driver helper).
         "VIRTUAL OUTPUT (FREE)" => "ВИРТУАЛЬНЫЙ ВЫХОД (БЕСПЛАТНО)",
         "Windows needs a virtual cable for voice chats; VB-CABLE is freeware from the official site. On Linux, VibeDrop creates a built-in virtual sink with no driver at all." => "Для голосовых чатов в Windows нужен виртуальный кабель; VB-CABLE — бесплатная программа с официального сайта. В Linux VibeDrop создаёт встроенный виртуальный выход вообще без драйвера.",
@@ -97,7 +99,7 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "No favorites yet" => "В избранном пока ничего нет",
         "Click the star on a sound to pin it here." => "Нажмите звёздочку у звука, чтобы он появился здесь.",
         "Your library is empty" => "Библиотека пуста",
-        "Use Import, drop WAV/MP3 files here, or add a sound from a URL." => "Воспользуйтесь «Импортом», перетащите сюда файлы WAV/MP3 или добавьте звук по ссылке.",
+        "Use Import, drop WAV/MP3/MP4 files here, or add a sound from a URL." => "Воспользуйтесь «Импортом», перетащите сюда файлы WAV/MP3/MP4 или добавьте звук по ссылке.",
         "Imported 1 sound" => "Импортирован 1 звук",
         // Row menu.
         "Rename" => "Переименовать",

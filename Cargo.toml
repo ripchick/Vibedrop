@@ -1,6 +1,6 @@
 [package]
 name = "vibedrop"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "VibeDrop - a free open-source soundboard with dual audio output"
 license = "Apache-2.0"
@@ -30,7 +30,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # GUI, audio and system integration
 eframe = { version = "0.29", features = ["android-native-activity"] }
 cpal = "0.15"
-symphonia = { version = "0.5", default-features = false, features = ["mp3", "wav", "pcm"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "wav", "pcm", "isomp4", "aac", "alac"] }
 global-hotkey = "0.6"
 percent-encoding = "2"
 

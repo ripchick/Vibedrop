@@ -177,6 +177,7 @@ enum Action {
     EditHotkey(String),
     ClearHotkey(String),
     Remove(String),
+    ExtractAudio(String),
 }
 
 /// Owned snapshot of one library entry for drawing.
@@ -190,6 +191,8 @@ struct Row {
     playing: bool,
     missing: bool,
     volume: f32,
+    /// True when the source file is a video (MP4/MOV) with an audio track.
+    video: bool,
 }
 
 pub struct VibeDropApp {
@@ -649,7 +652,10 @@ impl VibeDropApp {
         {
             let picked = rfd::FileDialog::new()
                 .set_title(lang::t(&self.settings.language, "Import sounds"))
-                .add_filter(lang::t(&self.settings.language, "Audio (WAV, MP3)"), &["wav", "mp3"])
+                .add_filter(
+                    lang::t(&self.settings.language, "Audio & video (WAV, MP3, MP4)"),
+                    &["wav", "mp3", "mp4", "m4a", "mov"],
+                )
                 .pick_files();
             if let Some(files) = picked {
                 self.import_paths(files);
@@ -737,7 +743,10 @@ impl VibeDropApp {
         {
             let Some(picked) = rfd::FileDialog::new()
                 .set_title(lang::t(&self.settings.language, "Locate the sound file"))
-                .add_filter(lang::t(&self.settings.language, "Audio (WAV, MP3)"), &["wav", "mp3"])
+                .add_filter(
+                    lang::t(&self.settings.language, "Audio & video (WAV, MP3, MP4)"),
+                    &["wav", "mp3", "mp4", "m4a", "mov"],
+                )
                 .pick_file()
             else {
                 return;
@@ -760,6 +769,41 @@ impl VibeDropApp {
             self.sync_index();
             self.toast(ToastKind::Success, lang::t(&self.settings.language, "File linked"));
         }
+    }
+
+    /// Decode a video file (MP4/MOV) and save its audio track as a new WAV library entry.
+    fn extract_audio(&mut self, id: &str) {
+        let Some(entry) = self.library.get(id).cloned() else {
+            return;
+        };
+        let lang = self.settings.language.clone();
+        match self.extract_audio_inner(&entry) {
+            Ok(name) => {
+                let text = if lang::ru(&lang) {
+                    format!("Звук извлечён: {name}")
+                } else {
+                    format!("Audio extracted: {name}")
+                };
+                self.toast(ToastKind::Success, text);
+            }
+            Err(e) => self.toast(ToastKind::Error, lang::tx(&lang, &e)),
+        }
+    }
+
+    fn extract_audio_inner(&mut self, entry: &SoundEntry) -> Result<String, String> {
+        let decoded = crate::audio::engine::decode_file(&entry.path)?;
+        let stamp = unix_now();
+        std::fs::create_dir_all(&self.paths.sounds_dir).map_err(|e| e.to_string())?;
+        let dest = self.paths.sounds_dir.join(format!("{}-{stamp}.wav", entry.id));
+        write_wav16(&dest, &decoded.samples, decoded.rate).map_err(|e| e.to_string())?;
+        let mut sound = import_file(&dest, None, ImportSource::Local).map_err(|e| e.to_string())?;
+        sound.name = format!("{} (audio)", entry.name);
+        sound.duration_secs = Some(decoded.duration_secs());
+        let name = sound.name.clone();
+        self.library.add_entry(sound);
+        self.library_dirty = true;
+        self.sync_index();
+        Ok(name)
     }
 
     /// Hotkeys of sounds and the microphone-mute hotkey share one namespace.
@@ -1150,7 +1194,7 @@ impl VibeDropApp {
             let text = if lang::ru(&self.settings.language) {
                 "Перетащите файлы WAV / MP3 сюда для импорта"
             } else {
-                "Drop WAV / MP3 files to import"
+                "Drop WAV / MP3 / MP4 files to import"
             };
             painter.text(
                 screen.center(),
@@ -1771,6 +1815,10 @@ impl VibeDropApp {
                 if missing {
                     parts.push(lang::t(&lang, "File missing").to_string());
                 }
+                let video = e.path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+                    let ext = ext.to_ascii_lowercase();
+                    matches!(ext.as_str(), "mp4" | "m4a" | "mov")
+                });
                 Row {
                     id: e.id.clone(),
                     name: e.name.clone(),
@@ -1781,6 +1829,7 @@ impl VibeDropApp {
                     playing: self.engine.is_playing(&e.id),
                     missing,
                     volume: e.volume,
+                    video,
                 }
             })
             .collect();
@@ -1804,7 +1853,10 @@ impl VibeDropApp {
                     } else {
                         (
                             lang::t(&lang, "Your library is empty"),
-                            lang::t(&lang, "Use Import, drop WAV/MP3 files here, or add a sound from a URL."),
+                            lang::t(
+                                &lang,
+                                "Use Import, drop WAV/MP3/MP4 files here, or add a sound from a URL.",
+                            ),
                         )
                     };
                     ui.label(RichText::new(title).size(22.0).strong().color(theme::TEXT));
@@ -1907,6 +1959,10 @@ impl VibeDropApp {
                             *action = Some(Action::Relink(row.id.clone()));
                             ui.close_menu();
                         }
+                        if row.video && ui.button(lang::t(lang, "Extract audio to WAV")).clicked() {
+                            *action = Some(Action::ExtractAudio(row.id.clone()));
+                            ui.close_menu();
+                        }
                         ui.separator();
                         ui.label(
                             RichText::new(lang::t(lang, "Sound volume"))
@@ -2004,6 +2060,7 @@ impl VibeDropApp {
                 }
             }
             Action::Relink(id) => self.relink_sound(&id),
+            Action::ExtractAudio(id) => self.extract_audio(&id),
         }
     }
 
@@ -3302,6 +3359,33 @@ fn download_vbcable(dest: &PathBuf) -> Result<(), String> {
     }
     let bytes = resp.bytes().map_err(|e| e.to_string())?;
     std::fs::write(dest, bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Write interleaved stereo f32 samples as a 16-bit PCM WAV file.
+fn write_wav16(path: &std::path::Path, samples: &[f32], rate: u32) -> std::io::Result<()> {
+    use std::io::Write;
+    let data_len = (samples.len() * 2) as u32;
+    let mut header = [0u8; 44];
+    header[0..4].copy_from_slice(b"RIFF");
+    header[4..8].copy_from_slice(&(36 + data_len).to_le_bytes());
+    header[8..12].copy_from_slice(b"WAVE");
+    header[12..16].copy_from_slice(b"fmt ");
+    header[16..20].copy_from_slice(&16u32.to_le_bytes());
+    header[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
+    header[22..24].copy_from_slice(&2u16.to_le_bytes()); // stereo
+    header[24..28].copy_from_slice(&rate.to_le_bytes());
+    header[28..32].copy_from_slice(&(rate * 4).to_le_bytes()); // byte rate
+    header[32..34].copy_from_slice(&4u16.to_le_bytes()); // block align
+    header[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
+    header[36..40].copy_from_slice(b"data");
+    header[40..44].copy_from_slice(&data_len.to_le_bytes());
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(&header)?;
+    for &sample in samples {
+        let value = (sample.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+        file.write_all(&value.to_le_bytes())?;
+    }
     Ok(())
 }
 
