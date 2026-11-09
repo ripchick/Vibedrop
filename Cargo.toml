@@ -1,6 +1,6 @@
 [package]
 name = "vibedrop"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "VibeDrop - a free open-source soundboard with dual audio output"
 license = "Apache-2.0"
@@ -26,6 +26,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 crossbeam-channel = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+image = "0.25"
 socket2 = "0.6"
 
 # GUI, audio and system integration

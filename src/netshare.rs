@@ -26,6 +26,20 @@ pub struct PeerInfo {
     pub now_playing: Option<String>,
     pub addr: SocketAddr,
     pub last_seen: u64,
+    /// Discord identity shared over LAN (from the READY dispatch, no OAuth).
+    pub discord_id: Option<String>,
+    pub discord_user: String,
+    pub avatar: Option<String>,
+}
+
+impl PeerInfo {
+    pub fn display_name_for_ui(&self) -> String {
+        if !self.discord_user.is_empty() {
+            self.discord_user.clone()
+        } else {
+            self.name.clone()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -92,6 +106,34 @@ struct Packet {
     playing: Option<String>,
     sound: Option<String>,
     port: Option<u16>,
+    d_id: Option<String>,
+    d_user: Option<String>,
+    d_av: Option<String>,
+}
+
+/// Build a discovery packet stamped with our Discord identity (if signed in).
+fn packet(t: &str, id: &str, name: &str, playing: Option<String>, sound: Option<String>, port: Option<u16>) -> Packet {
+    let (d_id, d_user, d_av) = if t == "hello" {
+        let user = crate::discord::current_user();
+        (
+            user.as_ref().map(|u| u.id.clone()),
+            user.as_ref().map(|u| u.display()),
+            user.and_then(|u| u.avatar.clone()),
+        )
+    } else {
+        (None, None, None)
+    };
+    Packet {
+        t: t.to_string(),
+        id: id.to_string(),
+        name: name.to_string(),
+        playing,
+        sound,
+        port,
+        d_id,
+        d_user,
+        d_av,
+    }
 }
 
 pub fn start(display_name: String, allow: bool, sounds_dir: PathBuf) -> ShareHandle {
@@ -137,14 +179,7 @@ fn worker(
                     let listener = TcpListener::bind(("0.0.0.0", 0)).ok();
                     if let Some(listener) = listener {
                         let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-                        let pkt = Packet {
-                            t: "req".to_string(),
-                            id: id.clone(),
-                            name: display_name.clone(),
-                            playing: None,
-                            sound: Some(sound.clone()),
-                            port: Some(port),
-                        };
+                        let pkt = packet("req", &id, &display_name, None, Some(sound.clone()), Some(port));
                         if let Ok(bytes) = serde_json::to_vec(&pkt) {
                             let _ = socket.send_to(&bytes, addr);
                         }
@@ -169,14 +204,7 @@ fn worker(
                             }
                         }
                     } else {
-                        let pkt = Packet {
-                            t: "deny".to_string(),
-                            id: id.clone(),
-                            name: display_name.clone(),
-                            playing: None,
-                            sound: None,
-                            port: None,
-                        };
+                        let pkt = packet("deny", &id, &display_name, None, None, None);
                         if let Ok(bytes) = serde_json::to_vec(&pkt) {
                             let _ = socket.send_to(&bytes, addr);
                         }
@@ -218,14 +246,7 @@ fn worker(
         // Discovery heartbeat.
         if last_hello.elapsed() >= Duration::from_secs(HELLO_SECS) {
             last_hello = std::time::Instant::now();
-            let pkt = Packet {
-                t: "hello".to_string(),
-                id: id.clone(),
-                name: display_name.clone(),
-                playing: now_playing.clone(),
-                sound: None,
-                port: None,
-            };
+            let pkt = packet("hello", &id, &display_name, now_playing.clone(), None, None);
             if let Ok(bytes) = serde_json::to_vec(&pkt) {
                 let _ = socket.send_to(&bytes, broadcast);
             }
@@ -250,6 +271,9 @@ fn worker(
                                     now_playing: pkt.playing.clone(),
                                     addr,
                                     last_seen: unix_now(),
+                                    discord_id: pkt.d_id.clone(),
+                                    discord_user: pkt.d_user.clone().unwrap_or_default(),
+                                    avatar: pkt.d_av.clone(),
                                 },
                             );
                         }
@@ -263,14 +287,7 @@ fn worker(
                                     });
                                 }
                                 _ => {
-                                    let pkt = Packet {
-                                        t: "deny".to_string(),
-                                        id: id.clone(),
-                                        name: display_name.clone(),
-                                        playing: None,
-                                        sound: None,
-                                        port: None,
-                                    };
+                                    let pkt = packet("deny", &id, &display_name, None, None, None);
                                     if let Ok(bytes) = serde_json::to_vec(&pkt) {
                                         let _ = socket.send_to(&bytes, addr);
                                     }

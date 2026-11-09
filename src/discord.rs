@@ -5,6 +5,7 @@
 //! retries quietly.
 
 use crossbeam_channel::{Receiver, Sender};
+use serde::Deserialize;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -29,6 +30,41 @@ struct Presence {
 pub struct DiscordPresence {
     tx: Sender<Presence>,
     status: Arc<Mutex<DiscordStatus>>,
+    user: Arc<Mutex<Option<DiscordUser>>>,
+}
+
+/// User info from the READY dispatch (no OAuth needed over local IPC).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct DiscordUser {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub global_name: String,
+    #[serde(default)]
+    pub avatar: Option<String>,
+}
+
+impl DiscordUser {
+    pub fn display(&self) -> String {
+        if !self.global_name.is_empty() {
+            self.global_name.clone()
+        } else {
+            self.username.clone()
+        }
+    }
+}
+
+/// The logged-in Discord user, if any (shared with the LAN-sharing module
+/// so peers can exchange Discord nicknames and avatar hashes).
+static CURRENT_USER: std::sync::OnceLock<Arc<Mutex<Option<DiscordUser>>>> = std::sync::OnceLock::new();
+
+pub fn current_user() -> Option<DiscordUser> {
+    CURRENT_USER
+        .get()
+        .cloned()
+        .and_then(|arc| arc.lock().map(|guard| guard.clone()).ok().flatten())
 }
 
 enum Transport {
@@ -72,15 +108,22 @@ impl DiscordPresence {
     pub fn start() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded::<Presence>();
         let status = Arc::new(Mutex::new(DiscordStatus::Connecting));
+        let user = Arc::new(Mutex::new(None));
+        let _ = CURRENT_USER.set(Arc::clone(&user));
         let thread_status = Arc::clone(&status);
+        let thread_user = Arc::clone(&user);
         std::thread::spawn(move || {
-            worker(rx, thread_status);
+            worker(rx, thread_status, thread_user);
         });
-        Self { tx, status }
+        Self { tx, status, user }
     }
 
     pub fn status(&self) -> DiscordStatus {
         *self.status.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn user(&self) -> Option<DiscordUser> {
+        self.user.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Non-blocking; drops the update if the worker is busy.
@@ -97,7 +140,7 @@ impl DiscordPresence {
     }
 }
 
-fn worker(rx: Receiver<Presence>, status: Arc<Mutex<DiscordStatus>>) {
+fn worker(rx: Receiver<Presence>, status: Arc<Mutex<DiscordStatus>>, user: Arc<Mutex<Option<DiscordUser>>>) {
     let pid = std::process::id();
     let mut last: Option<Presence> = None;
     loop {
@@ -111,8 +154,11 @@ fn worker(rx: Receiver<Presence>, status: Arc<Mutex<DiscordStatus>>) {
         };
         *status.lock().unwrap_or_else(|e| e.into_inner()) = DiscordStatus::Connecting;
         match handshake(&mut stream, pid) {
-            Ok(()) => {
+            Ok(ready_user) => {
                 *status.lock().unwrap_or_else(|e| e.into_inner()) = DiscordStatus::Connected;
+                if let Some(u) = ready_user {
+                    *user.lock().unwrap_or_else(|e| e.into_inner()) = Some(u);
+                }
                 // Keep the activity fresh; the app pushes updates on change, the worker
                 // also re-sends every 15 s so the elapsed readout stays alive.
                 let mut last_sent = std::time::Instant::now() - Duration::from_secs(15);
@@ -171,15 +217,15 @@ fn read_frame(stream: &mut impl Read) -> std::io::Result<(u32, Vec<u8>)> {
     Ok((opcode, payload))
 }
 
-fn handshake(stream: &mut Transport, _pid: u32) -> std::io::Result<()> {
-    let payload = format!(
-        "{{\"cmd\":\"IDENTIFY\",\"nonce\":\"{}\",\"args\":{{\"client_id\":\"{CLIENT_ID}\"}}}}",
-        nonce()
-    );
+fn handshake(stream: &mut Transport, _pid: u32) -> std::io::Result<Option<DiscordUser>> {
+    let payload = format!("{{\"v\":1,\"client_id\":\"{CLIENT_ID}\"}}");
     write_frame(stream, 0, &payload)?;
-    // Best effort: read the READY frame (Discord replies immediately).
-    let _ = read_frame(stream);
-    Ok(())
+    // READY frame carries the logged-in user (nick + avatar, no OAuth needed over IPC).
+    let user = read_frame(stream)
+        .ok()
+        .and_then(|(_, bytes)| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|json| serde_json::from_value(json.get("data")?.get("user")?.clone()).ok());
+    Ok(user)
 }
 
 fn send_activity(stream: &mut Transport, pid: u32, presence: Option<&Presence>) -> std::io::Result<()> {

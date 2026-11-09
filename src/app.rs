@@ -241,6 +241,11 @@ pub struct VibeDropApp {
     discord: crate::discord::DiscordPresence,
     share: crate::netshare::ShareHandle,
     peers: Vec<crate::netshare::PeerInfo>,
+    discord_user_seen: Option<String>,
+    avatar_textures: HashMap<String, egui::TextureHandle>,
+    avatar_pending: HashSet<String>,
+    avatar_rx: Receiver<(String, Vec<u8>)>,
+    avatar_tx: Sender<(String, Vec<u8>)>,
 
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
@@ -290,6 +295,7 @@ impl VibeDropApp {
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
         let (helper_tx, helper_rx) = unbounded::<HelperMsg>();
+        let (avatar_tx, avatar_rx) = unbounded::<(String, Vec<u8>)>();
         let share = crate::netshare::start(
             settings.display_name.clone(),
             settings.allow_share_requests,
@@ -334,6 +340,11 @@ impl VibeDropApp {
             discord,
             share,
             peers: Vec::new(),
+            discord_user_seen: None,
+            avatar_textures: HashMap::new(),
+            avatar_pending: HashSet::new(),
+            avatar_rx,
+            avatar_tx,
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -2096,6 +2107,63 @@ impl VibeDropApp {
 
     // ---- Presence: Discord Rich Presence + local sound sharing --------------------------------
 
+    /// Adopt the Discord username (from the READY dispatch) as our sharing name.
+    fn sync_discord_user(&mut self, _ctx: &egui::Context) {
+        let Some(user) = self.discord.user() else {
+            return;
+        };
+        if self.discord_user_seen.as_deref() == Some(user.id.as_str()) {
+            return;
+        }
+        self.discord_user_seen = Some(user.id.clone());
+        let display = user.display();
+        if self.settings.display_name != display {
+            self.settings.display_name = display;
+            self.settings_dirty = true;
+            self.share.set_name(self.settings.display_name.clone());
+        }
+        if let (Some(avatar), id) = (user.avatar.clone(), user.id.clone()) {
+            self.queue_avatar(id, avatar);
+        }
+    }
+
+    fn queue_avatar(&mut self, id: String, hash: String) {
+        if self.avatar_textures.contains_key(&id) || !self.avatar_pending.insert(id.clone()) {
+            return;
+        }
+        let tx = self.avatar_tx.clone();
+        std::thread::spawn(move || {
+            let url = format!("https://cdn.discordapp.com/avatars/{id}/{hash}.png?size=64");
+            let client = reqwest::blocking::Client::builder()
+                .user_agent("VibeDrop/0.8")
+                .timeout(Duration::from_secs(15))
+                .build();
+            if let Ok(client) = client {
+                if let Ok(resp) = client.get(&url).send() {
+                    if let Ok(bytes) = resp.bytes() {
+                        let _ = tx.send((id, bytes.to_vec()));
+                    }
+                }
+            }
+        });
+    }
+
+    fn poll_avatars(&mut self, ctx: &egui::Context) {
+        while let Ok((id, bytes)) = self.avatar_rx.try_recv() {
+            self.avatar_pending.remove(&id);
+            if self.avatar_textures.contains_key(&id) {
+                continue;
+            }
+            if let Ok(image) = image::load_from_memory(&bytes) {
+                let rgba = image.to_rgba8();
+                let (w, h) = (rgba.width(), rgba.height());
+                let color = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], rgba.as_raw());
+                let texture = ctx.load_texture(id.clone(), color, egui::TextureOptions::default());
+                self.avatar_textures.insert(id, texture);
+            }
+        }
+    }
+
     /// Push the current playback state to Discord and to LAN peers (cheap, runs every frame).
     fn sync_presence(&mut self) {
         let now_name = self
@@ -2125,7 +2193,14 @@ impl VibeDropApp {
     fn poll_share(&mut self) {
         while let Some(msg) = self.share.poll() {
             match msg {
-                crate::netshare::ShareMsg::Peers(list) => self.peers = list,
+                crate::netshare::ShareMsg::Peers(list) => {
+                    for peer in &list {
+                        if let (Some(id), Some(hash)) = (peer.discord_id.clone(), peer.avatar.clone()) {
+                            self.queue_avatar(id, hash);
+                        }
+                    }
+                    self.peers = list;
+                }
                 crate::netshare::ShareMsg::IncomingRequest { addr, sound } => {
                     let file = if self.settings.allow_share_requests {
                         self.library
@@ -2175,23 +2250,43 @@ impl VibeDropApp {
 
         theme::card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            theme::section_title(ui, lang::t(&lang, "YOUR NAME"));
+            theme::section_title(ui, lang::t(&lang, "DISCORD"));
             ui.horizontal(|ui| {
-                let mut name = self.settings.display_name.clone();
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut name)
-                        .hint_text("VibeDrop user")
-                        .desired_width(240.0),
-                );
-                if resp.lost_focus() && name.trim() != self.settings.display_name {
-                    self.settings.display_name = name.trim().to_string();
-                    self.settings_dirty = true;
-                    self.share.set_name(self.settings.display_name.clone());
+                match self.discord.user() {
+                    Some(user) => {
+                        if let Some(texture) = self.avatar_textures.get(&user.id) {
+                            ui.add(
+                                egui::Image::new((texture.id(), egui::vec2(38.0, 38.0)))
+                                    .fit_to_exact_size(egui::vec2(38.0, 38.0))
+                                    .rounding(Rounding::same(19.0)),
+                            );
+                        }
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(user.display()).strong().color(theme::TEXT));
+                            ui.label(
+                                RichText::new(format!("Discord: {}", lang::t(&lang, "connected")))
+                                    .size(12.5)
+                                    .color(theme::ACCENT),
+                            );
+                        });
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new(lang::t(
+                                &lang,
+                                "Not connected to Discord. Open Discord to link your nickname and avatar.",
+                            ))
+                            .color(theme::TEXT_DIM),
+                        );
+                    }
                 }
             });
             ui.add_space(6.0);
             let mut allow = self.settings.allow_share_requests;
-            if ui.checkbox(&mut allow, lang::t(&lang, "Allow sound requests from the network")).changed() {
+            if ui
+                .checkbox(&mut allow, lang::t(&lang, "Allow sound requests from the network"))
+                .changed()
+            {
                 self.settings.allow_share_requests = allow;
                 self.settings_dirty = true;
                 self.share.set_allow(allow);
@@ -2225,8 +2320,41 @@ impl VibeDropApp {
                         theme::card().show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
+                                match peer.discord_id.as_deref().and_then(|id| self.avatar_textures.get(id)) {
+                                    Some(texture) => {
+                                        ui.add(
+                                            egui::Image::new((texture.id(), egui::vec2(38.0, 38.0)))
+                                                .fit_to_exact_size(egui::vec2(38.0, 38.0))
+                                                .rounding(Rounding::same(19.0)),
+                                        );
+                                    }
+                                    None => {
+                                        let (rect, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
+                                        let p = ui.painter();
+                                        p.circle(
+                                            rect.center(),
+                                            19.0,
+                                            theme::CARD_HOVER,
+                                            Stroke::new(1.0_f32, theme::BORDER),
+                                        );
+                                        let initial = peer
+                                            .discord_user
+                                            .chars()
+                                            .next()
+                                            .or_else(|| peer.name.chars().next())
+                                            .map(|c| c.to_string())
+                                            .unwrap_or_else(|| "?".to_string());
+                                        p.text(
+                                            rect.center(),
+                                            Align2::CENTER_CENTER,
+                                            initial,
+                                            egui::FontId::proportional(16.0),
+                                            theme::TEXT_DIM,
+                                        );
+                                    }
+                                }
                                 ui.vertical(|ui| {
-                                    ui.label(RichText::new(&peer.name).strong().color(theme::TEXT));
+                                    ui.label(RichText::new(peer.display_name_for_ui()).strong().color(theme::TEXT));
                                     let info = match &peer.now_playing {
                                         Some(sound) => {
                                             if lang::ru(&lang) {
@@ -3762,6 +3890,8 @@ impl eframe::App for VibeDropApp {
         self.handle_close(ctx);
         self.sync_presence();
         self.poll_share();
+        self.sync_discord_user(ctx);
+        self.poll_avatars(ctx);
 
         self.draw_menubar(ctx);
         self.draw_transport(ctx);

@@ -36,6 +36,8 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Quit VibeDrop" => "Выйти из VibeDrop",
         "Share sounds with VibeDrop on your local network" => "Делитесь звуками с VibeDrop в локальной сети",
         "YOUR NAME" => "ВАШЕ ИМЯ",
+        "DISCORD" => "DISCORD",
+        "Not connected to Discord. Open Discord to link your nickname and avatar." => "Не подключено к Discord. Откройте Discord, чтобы подтянуть ник и аватарку.",
         "Allow sound requests from the network" => "Разрешать запросы звуков из сети",
         "Only VibeDrop apps on the same local network see each other. Borrowed sounds are copied directly between the machines — no server involved." => "Только приложения VibeDrop в одной локальной сети видят друг друга. Звуки копируются напрямую между машинами — без сервера.",
         "PEOPLE AROUND" => "РЯДОМ С ВАМИ",
