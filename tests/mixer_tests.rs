@@ -69,7 +69,10 @@ fn seek_moves_playback_position() {
     assert_eq!(total, 100);
     assert!(m.seek("a", 0.5));
     let (pos, total) = m.progress("a").expect("still playing");
-    assert!((pos as f64 / total as f64 - 0.5).abs() < 0.02, "pos {pos} total {total}");
+    assert!(
+        (pos as f64 / total as f64 - 0.5).abs() < 0.02,
+        "pos {pos} total {total}"
+    );
     // Seeking a sound that is not playing changes nothing.
     assert!(!m.seek("missing", 0.5));
 }
