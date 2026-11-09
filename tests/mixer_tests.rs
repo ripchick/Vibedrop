@@ -62,6 +62,19 @@ fn short_file_ends_cleanly_across_blocks() {
 }
 
 #[test]
+fn seek_moves_playback_position() {
+    let mut m = Mixer::new();
+    m.play("a", buf(1.0, 100), 1.0, RetriggerPolicy::Overlap);
+    let (_, total) = m.progress("a").expect("playing");
+    assert_eq!(total, 100);
+    assert!(m.seek("a", 0.5));
+    let (pos, total) = m.progress("a").expect("still playing");
+    assert!((pos as f64 / total as f64 - 0.5).abs() < 0.02, "pos {pos} total {total}");
+    // Seeking a sound that is not playing changes nothing.
+    assert!(!m.seek("missing", 0.5));
+}
+
+#[test]
 fn stop_and_stop_all() {
     let mut m = Mixer::new();
     m.play("a", buf(0.1, 100), 1.0, RetriggerPolicy::Overlap);

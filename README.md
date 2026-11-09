@@ -60,7 +60,8 @@ support.
   (`global-hotkey` crate; on Linux registration depends on the desktop environment — see
   known limitations).
 - Play/stop/volume controls, overlap protection, queue-free "tickets" so Stop always beats
-  Play, damaged/audio-file handling that reports instead of panicking.
+  Play, seek by clicking/dragging the progress bar, damaged/audio-file handling that
+  reports instead of panicking.
 - Sound downloads from approved `soundpad://`/`vibedrop://` links: scheme-validated parsing,
   rejects private IPs and non-HTTP(S) targets, size limits, no auto-download without user
   action, pause/cancel, part-file cleanup, files never executed.
@@ -68,10 +69,6 @@ support.
   language at a time, including error messages from the core modules).
 - Settings organized into cards, dark Fluent look (Segoe UI, Windows-style) with a sidebar,
   sound table and player bar, toasts instead of panics, keyboard-friendly focus handling.
-- Discord Rich Presence: status shows "VibeDrop" and, while a sound plays, what you're
-  listening to with the elapsed time — like Spotify (Discord must be running).
-- Friends page: borrow sounds from other VibeDrop instances on the same local network
-  (discovery + direct copying, no server); you choose whether to allow requests in Settings.
 - Virtual output helper: download the free VB-CABLE (Windows) from the official site,
   or create a built-in virtual sink on Linux — no driver ships inside VibeDrop.
 

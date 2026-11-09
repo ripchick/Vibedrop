@@ -339,6 +339,19 @@ impl Mixer {
         PlayOutcome::Started(id)
     }
 
+    /// Move every voice of `sound_id` to a fraction (0..=1) of its length.
+    /// Returns true if a voice was found and moved.
+    pub fn seek(&mut self, sound_id: &str, frac: f32) -> bool {
+        let frac = frac.clamp(0.0, 1.0);
+        let mut found = false;
+        for v in self.voices.iter_mut().filter(|v| v.sound_id == sound_id) {
+            let len = v.data.len();
+            v.pos = ((frac as f64 * len as f64) as usize).min(len.saturating_sub(CHANNELS));
+            found = true;
+        }
+        found
+    }
+
     /// Stop every voice of `sound_id`; returns how many were stopped.
     pub fn stop(&mut self, sound_id: &str) -> usize {
         let before = self.voices.len();

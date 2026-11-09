@@ -81,25 +81,17 @@ enum Page {
     Library,
     Favorites,
     History,
-    Friends,
     Settings,
 }
 
 impl Page {
-    const ALL: [Page; 5] = [
-        Page::Library,
-        Page::Favorites,
-        Page::History,
-        Page::Friends,
-        Page::Settings,
-    ];
+    const ALL: [Page; 4] = [Page::Library, Page::Favorites, Page::History, Page::Settings];
 
     fn title(self) -> &'static str {
         match self {
             Page::Library => "Library",
             Page::Favorites => "Favorites",
             Page::History => "History",
-            Page::Friends => "Friends",
             Page::Settings => "Settings",
         }
     }
@@ -109,7 +101,6 @@ impl Page {
             Page::Library => Icon::Library,
             Page::Favorites => Icon::Star,
             Page::History => Icon::History,
-            Page::Friends => Icon::Volume,
             Page::Settings => Icon::Settings,
         }
     }
@@ -238,15 +229,6 @@ pub struct VibeDropApp {
     helper_rx: Receiver<HelperMsg>,
     helper_tx: Sender<HelperMsg>,
 
-    discord: crate::discord::DiscordPresence,
-    share: crate::netshare::ShareHandle,
-    peers: Vec<crate::netshare::PeerInfo>,
-    discord_user_seen: Option<String>,
-    avatar_textures: HashMap<String, egui::TextureHandle>,
-    avatar_pending: HashSet<String>,
-    avatar_rx: Receiver<(String, Vec<u8>)>,
-    avatar_tx: Sender<(String, Vec<u8>)>,
-
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
     url_dialog: Option<UrlDialog>,
@@ -295,13 +277,6 @@ impl VibeDropApp {
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
         let (helper_tx, helper_rx) = unbounded::<HelperMsg>();
-        let (avatar_tx, avatar_rx) = unbounded::<(String, Vec<u8>)>();
-        let share = crate::netshare::start(
-            settings.display_name.clone(),
-            settings.allow_share_requests,
-            paths.sounds_dir.clone(),
-        );
-        let discord = crate::discord::DiscordPresence::start();
         let missing: HashSet<String> = library
             .entries
             .iter()
@@ -337,14 +312,6 @@ impl VibeDropApp {
             dl_rx,
             helper_rx,
             helper_tx,
-            discord,
-            share,
-            peers: Vec::new(),
-            discord_user_seen: None,
-            avatar_textures: HashMap::new(),
-            avatar_pending: HashSet::new(),
-            avatar_rx,
-            avatar_tx,
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -1464,6 +1431,7 @@ impl VibeDropApp {
         let progress = now_id.as_deref().and_then(|id| self.engine.progress(id));
         let mut toggle = false;
         let mut levels_changed = false;
+        let mut seek: Option<f32> = None;
         egui::TopBottomPanel::top("transport")
             .frame(
                 egui::Frame::none()
@@ -1483,7 +1451,7 @@ impl VibeDropApp {
                     };
                     ui.label(RichText::new(time_text).monospace().size(13.0).color(theme::TEXT_DIM));
                     let bar_w = (ui.available_width() - 230.0).max(120.0);
-                    let (rect, _) = ui.allocate_exact_size(vec2(bar_w, 5.0), Sense::hover());
+                    let (rect, resp) = ui.allocate_exact_size(vec2(bar_w, 5.0), Sense::click_and_drag());
                     ui.painter().rect_filled(rect, 3.0, theme::BORDER);
                     let frac = match progress {
                         Some((pos, total)) if total > 0.0 => (pos / total).clamp(0.0, 1.0) as f32,
@@ -1491,6 +1459,12 @@ impl VibeDropApp {
                     };
                     let filled = egui::Rect::from_min_size(rect.min, vec2(bar_w * frac, 5.0));
                     ui.painter().rect_filled(filled, 3.0, theme::ACCENT);
+                    if progress.is_some() && (resp.clicked() || resp.dragged()) {
+                        if let Some(pos) = resp.interact_pointer_pos() {
+                            let f = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
+                            seek = Some(f);
+                        }
+                    }
                     let (icon_rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
                     theme::paint_icon(ui.painter(), Icon::Volume, icon_rect.center(), 18.0, theme::TEXT_DIM);
                     ui.spacing_mut().slider_width = 130.0;
@@ -1501,6 +1475,11 @@ impl VibeDropApp {
         if levels_changed {
             self.engine.set_levels(self.levels());
             self.settings_dirty = true;
+        }
+        if let Some(frac) = seek {
+            if let Some(id) = &now_id {
+                self.engine.seek(id, frac);
+            }
         }
         if toggle {
             if let Some(id) = now_id {
@@ -1547,13 +1526,6 @@ impl VibeDropApp {
                             .size(12.5)
                             .color(theme::TEXT_DIM),
                     );
-                    if self.discord.status() == crate::discord::DiscordStatus::Connected {
-                        ui.label(
-                            RichText::new(format!("Discord: {}", lang::t(&lang, "connected")))
-                                .size(12.5)
-                                .color(theme::ACCENT),
-                        );
-                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::danger_button(ui, lang::t(&lang, "Stop All")).clicked() {
                             stop_all = true;
@@ -1694,7 +1666,6 @@ impl VibeDropApp {
                 match self.page {
                     Page::Library | Page::Favorites => self.draw_sound_page(ui),
                     Page::History => self.draw_history_page(ui),
-                    Page::Friends => self.draw_friends_page(ui),
                     Page::Settings => self.draw_settings_page(ui),
                 }
             });
@@ -2102,287 +2073,6 @@ impl VibeDropApp {
             }
             Action::Relink(id) => self.relink_sound(&id),
             Action::ExtractAudio(id) => self.extract_audio(&id),
-        }
-    }
-
-    // ---- Presence: Discord Rich Presence + local sound sharing --------------------------------
-
-    /// Adopt the Discord username (from the READY dispatch) as our sharing name.
-    fn sync_discord_user(&mut self, _ctx: &egui::Context) {
-        let Some(user) = self.discord.user() else {
-            return;
-        };
-        if self.discord_user_seen.as_deref() == Some(user.id.as_str()) {
-            return;
-        }
-        self.discord_user_seen = Some(user.id.clone());
-        let display = user.display();
-        if self.settings.display_name != display {
-            self.settings.display_name = display;
-            self.settings_dirty = true;
-            self.share.set_name(self.settings.display_name.clone());
-        }
-        if let (Some(avatar), id) = (user.avatar.clone(), user.id.clone()) {
-            self.queue_avatar(id, avatar);
-        }
-    }
-
-    fn queue_avatar(&mut self, id: String, hash: String) {
-        if self.avatar_textures.contains_key(&id) || !self.avatar_pending.insert(id.clone()) {
-            return;
-        }
-        let tx = self.avatar_tx.clone();
-        std::thread::spawn(move || {
-            let url = format!("https://cdn.discordapp.com/avatars/{id}/{hash}.png?size=64");
-            let client = reqwest::blocking::Client::builder()
-                .user_agent("VibeDrop/0.8")
-                .timeout(Duration::from_secs(15))
-                .build();
-            if let Ok(client) = client {
-                if let Ok(resp) = client.get(&url).send() {
-                    if let Ok(bytes) = resp.bytes() {
-                        let _ = tx.send((id, bytes.to_vec()));
-                    }
-                }
-            }
-        });
-    }
-
-    fn poll_avatars(&mut self, ctx: &egui::Context) {
-        while let Ok((id, bytes)) = self.avatar_rx.try_recv() {
-            self.avatar_pending.remove(&id);
-            if self.avatar_textures.contains_key(&id) {
-                continue;
-            }
-            if let Ok(image) = image::load_from_memory(&bytes) {
-                let rgba = image.to_rgba8();
-                let (w, h) = (rgba.width(), rgba.height());
-                let color = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], rgba.as_raw());
-                let texture = ctx.load_texture(id.clone(), color, egui::TextureOptions::default());
-                self.avatar_textures.insert(id, texture);
-            }
-        }
-    }
-
-    /// Push the current playback state to Discord and to LAN peers (cheap, runs every frame).
-    fn sync_presence(&mut self) {
-        let now_name = self
-            .now_playing
-            .as_deref()
-            .and_then(|id| self.library.get(id))
-            .map(|e| e.name.clone());
-        let playing = self.now_playing.as_deref().is_some_and(|id| self.engine.is_playing(id));
-        let progress = self.now_playing.as_deref().and_then(|id| self.engine.progress(id));
-        let (details, state, started) = match (&now_name, playing, progress) {
-            (Some(name), true, Some((pos, total))) => {
-                let state = if total > 0.0 {
-                    format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total))
-                } else {
-                    theme::fmt_time(pos)
-                };
-                let started = (unix_now() as i64).saturating_sub(pos.round() as i64);
-                (Some(name.clone()), Some(state), Some(started))
-            }
-            (Some(name), _, _) => (Some(name.clone()), None, None),
-            (None, _, _) => (None, None, None),
-        };
-        self.discord.set(details, state, started);
-        self.share.set_now_playing(now_name);
-    }
-
-    fn poll_share(&mut self) {
-        while let Some(msg) = self.share.poll() {
-            match msg {
-                crate::netshare::ShareMsg::Peers(list) => {
-                    for peer in &list {
-                        if let (Some(id), Some(hash)) = (peer.discord_id.clone(), peer.avatar.clone()) {
-                            self.queue_avatar(id, hash);
-                        }
-                    }
-                    self.peers = list;
-                }
-                crate::netshare::ShareMsg::IncomingRequest { addr, sound } => {
-                    let file = if self.settings.allow_share_requests {
-                        self.library
-                            .search(&sound)
-                            .into_iter()
-                            .find(|e| e.name == sound)
-                            .map(|e| e.path.clone())
-                    } else {
-                        None
-                    };
-                    self.share.respond(addr, file);
-                }
-                crate::netshare::ShareMsg::ReceivedFile { name, path } => {
-                    match import_file(&path, None, ImportSource::Local) {
-                        Ok(entry) => {
-                            self.library.add_entry(entry);
-                            self.library_dirty = true;
-                            self.sync_index();
-                            let lang = self.settings.language.clone();
-                            let text = if lang::ru(&lang) {
-                                format!("Получен звук от друга: {name}")
-                            } else {
-                                format!("Borrowed sound from a friend: {name}")
-                            };
-                            self.toast(ToastKind::Success, text);
-                        }
-                        Err(e) => self.toast(ToastKind::Error, lang::tx(&self.settings.language, &e.to_string())),
-                    }
-                }
-                crate::netshare::ShareMsg::Note(note) => self.toast(ToastKind::Info, note),
-            }
-        }
-    }
-
-    // ---- Drawing: friends (LAN sound sharing) ------------------------------------------------
-
-    fn draw_friends_page(&mut self, ui: &mut Ui) {
-        let lang = self.settings.language.clone();
-        let mut borrow: Option<(std::net::SocketAddr, String)> = None;
-        page_header(
-            ui,
-            lang::t(&lang, "Friends"),
-            lang::t(&lang, "Share sounds with VibeDrop on your local network"),
-            |_ui| {},
-        );
-        ui.add_space(12.0);
-
-        theme::card().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            theme::section_title(ui, lang::t(&lang, "DISCORD"));
-            ui.horizontal(|ui| {
-                match self.discord.user() {
-                    Some(user) => {
-                        if let Some(texture) = self.avatar_textures.get(&user.id) {
-                            ui.add(
-                                egui::Image::new((texture.id(), egui::vec2(38.0, 38.0)))
-                                    .fit_to_exact_size(egui::vec2(38.0, 38.0))
-                                    .rounding(Rounding::same(19.0)),
-                            );
-                        }
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(user.display()).strong().color(theme::TEXT));
-                            ui.label(
-                                RichText::new(format!("Discord: {}", lang::t(&lang, "connected")))
-                                    .size(12.5)
-                                    .color(theme::ACCENT),
-                            );
-                        });
-                    }
-                    None => {
-                        ui.label(
-                            RichText::new(lang::t(
-                                &lang,
-                                "Not connected to Discord. Open Discord to link your nickname and avatar.",
-                            ))
-                            .color(theme::TEXT_DIM),
-                        );
-                    }
-                }
-            });
-            ui.add_space(6.0);
-            let mut allow = self.settings.allow_share_requests;
-            if ui
-                .checkbox(&mut allow, lang::t(&lang, "Allow sound requests from the network"))
-                .changed()
-            {
-                self.settings.allow_share_requests = allow;
-                self.settings_dirty = true;
-                self.share.set_allow(allow);
-            }
-            ui.label(
-                RichText::new(lang::t(
-                    &lang,
-                    "Only VibeDrop apps on the same local network see each other. Borrowed sounds are copied directly between the machines — no server involved.",
-                ))
-                .size(12.5)
-                .color(theme::TEXT_FAINT),
-            );
-        });
-
-        ui.add_space(10.0);
-        theme::section_title(ui, lang::t(&lang, "PEOPLE AROUND"));
-        if self.peers.is_empty() {
-            ui.label(
-                RichText::new(lang::t(
-                    &lang,
-                    "Nobody here yet. Open VibeDrop on another machine in the same network.",
-                ))
-                .color(theme::TEXT_DIM),
-            );
-        } else {
-            let peers = self.peers.clone();
-            ui.push_id("friends_scroll", |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 8.0;
-                    for peer in peers {
-                        theme::card().show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                match peer.discord_id.as_deref().and_then(|id| self.avatar_textures.get(id)) {
-                                    Some(texture) => {
-                                        ui.add(
-                                            egui::Image::new((texture.id(), egui::vec2(38.0, 38.0)))
-                                                .fit_to_exact_size(egui::vec2(38.0, 38.0))
-                                                .rounding(Rounding::same(19.0)),
-                                        );
-                                    }
-                                    None => {
-                                        let (rect, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
-                                        let p = ui.painter();
-                                        p.circle(
-                                            rect.center(),
-                                            19.0,
-                                            theme::CARD_HOVER,
-                                            Stroke::new(1.0_f32, theme::BORDER),
-                                        );
-                                        let initial = peer
-                                            .discord_user
-                                            .chars()
-                                            .next()
-                                            .or_else(|| peer.name.chars().next())
-                                            .map(|c| c.to_string())
-                                            .unwrap_or_else(|| "?".to_string());
-                                        p.text(
-                                            rect.center(),
-                                            Align2::CENTER_CENTER,
-                                            initial,
-                                            egui::FontId::proportional(16.0),
-                                            theme::TEXT_DIM,
-                                        );
-                                    }
-                                }
-                                ui.vertical(|ui| {
-                                    ui.label(RichText::new(peer.display_name_for_ui()).strong().color(theme::TEXT));
-                                    let info = match &peer.now_playing {
-                                        Some(sound) => {
-                                            if lang::ru(&lang) {
-                                                format!("Слушает: {sound}")
-                                            } else {
-                                                format!("Now playing: {sound}")
-                                            }
-                                        }
-                                        None => lang::t(&lang, "Idle").to_string(),
-                                    };
-                                    ui.label(RichText::new(info).size(12.5).color(theme::TEXT_DIM));
-                                });
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if let Some(sound) = &peer.now_playing {
-                                        if theme::secondary_button(ui, lang::t(&lang, "Borrow")).clicked() {
-                                            borrow = Some((peer.addr, sound.clone()));
-                                        }
-                                    }
-                                });
-                            });
-                        });
-                    }
-                });
-            });
-        }
-        if let Some((addr, sound)) = borrow {
-            self.share.request(addr, sound);
-            self.toast(ToastKind::Info, lang::t(&lang, "Request sent"));
         }
     }
 
@@ -3888,10 +3578,6 @@ impl eframe::App for VibeDropApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_events(ctx);
         self.handle_close(ctx);
-        self.sync_presence();
-        self.poll_share();
-        self.sync_discord_user(ctx);
-        self.poll_avatars(ctx);
 
         self.draw_menubar(ctx);
         self.draw_transport(ctx);

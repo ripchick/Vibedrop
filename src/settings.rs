@@ -68,12 +68,6 @@ pub struct Settings {
     pub copy_on_import: bool,
     /// When removing a library entry, also delete the VibeDrop-managed copy (never the user's original).
     pub delete_managed_copy_on_remove: bool,
-    /// Display name announced to nearby VibeDrop peers in local sharing.
-    #[serde(default)]
-    pub display_name: String,
-    /// Whether friends on the local network may borrow sounds from this instance.
-    #[serde(default)]
-    pub allow_share_requests: bool,
 }
 
 impl Default for Settings {
@@ -97,8 +91,6 @@ impl Default for Settings {
             close_behavior: CloseBehavior::Exit,
             copy_on_import: true,
             delete_managed_copy_on_remove: false,
-            display_name: default_display_name(),
-            allow_share_requests: false,
         }
     }
 }
@@ -113,19 +105,6 @@ fn clamp_unit(v: f32, fallback: f32) -> f32 {
 
 fn clean_device(name: Option<String>) -> Option<String> {
     name.filter(|n| !n.trim().is_empty())
-}
-
-/// Name announced to local-sharing peers by default (OS username or a neutral fallback).
-fn default_display_name() -> String {
-    let name = std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_default();
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        "VibeDrop user".to_string()
-    } else {
-        name
-    }
 }
 
 impl Settings {
@@ -166,13 +145,6 @@ impl Settings {
         self.default_sound_volume = clamp_unit(self.default_sound_volume, 1.0);
         if self.language.trim().is_empty() {
             self.language = "en".to_string();
-        }
-        self.display_name = self.display_name.trim().to_string();
-        if self.display_name.is_empty() {
-            self.display_name = default_display_name();
-        }
-        if self.display_name.chars().count() > 40 {
-            self.display_name = self.display_name.chars().take(40).collect();
         }
     }
 

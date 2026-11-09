@@ -2,14 +2,12 @@
 
 pub mod app;
 pub mod audio;
-pub mod discord;
 pub mod downloader;
 pub mod errors;
 pub mod fsutil;
 pub mod hotkeys;
 pub mod lang;
 pub mod library;
-pub mod netshare;
 pub mod paths;
 pub mod protocol;
 pub mod settings;

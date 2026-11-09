@@ -592,6 +592,15 @@ impl Engine {
         })
     }
 
+    /// Move the playing instances of a sound to a fraction (0..=1) of their length on all outputs.
+    pub fn seek(&self, sound_id: &str, frac: f32) -> bool {
+        let mut found = false;
+        for o in lock(&self.shared.outputs).iter() {
+            found |= lock(&o.mixer).seek(sound_id, frac);
+        }
+        found
+    }
+
     /// Number of sounds currently sounding.
     pub fn voice_count(&self) -> usize {
         lock(&self.shared.outputs)
