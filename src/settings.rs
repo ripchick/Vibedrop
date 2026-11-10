@@ -68,6 +68,85 @@ pub struct Settings {
     pub copy_on_import: bool,
     /// When removing a library entry, also delete the VibeDrop-managed copy (never the user's original).
     pub delete_managed_copy_on_remove: bool,
+    /// Appearance: colour theme, accent colour and UI density.
+    pub theme: ThemeSettings,
+    /// Behaviour of the sound table and the player.
+    pub playback: PlaybackSettings,
+    /// Whether the first-run setup wizard was completed.
+    #[serde(default)]
+    pub setup_done: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct ThemeSettings {
+    /// `dark` (classic soundboard grey) or `midnight` (deep blue-black).
+    pub variant: String,
+    /// Accent colour as `#RRGGBB`; empty = the built-in accent.
+    pub accent: String,
+    /// Corner rounding of cards and panels, in pixels (0..=24).
+    pub corner_radius: f32,
+    /// Base font size in points (12..=20).
+    pub font_scale: f32,
+    /// Show the icon labels in the sidebar.
+    pub show_sidebar_labels: bool,
+    /// Show the transport strip under the menu bar.
+    pub show_transport: bool,
+    /// Show the status bar at the bottom.
+    pub show_status_bar: bool,
+    /// Dim the window while a sound plays (visual feedback).
+    pub flash_on_play: bool,
+    /// Show a waveform/level meter in the transport strip.
+    pub show_level_meter: bool,
+}
+
+impl Default for ThemeSettings {
+    fn default() -> Self {
+        Self {
+            variant: "dark".to_string(),
+            accent: String::new(),
+            corner_radius: 8.0,
+            font_scale: 15.0,
+            show_sidebar_labels: true,
+            show_transport: true,
+            show_status_bar: true,
+            flash_on_play: false,
+            show_level_meter: false,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct PlaybackSettings {
+    /// Play the sound that was played last when the app starts.
+    pub resume_last_sound: bool,
+    /// Seconds of the sound to skip when it starts (useful for long intros).
+    pub start_offset_secs: f64,
+    /// Fade in/out time in milliseconds.
+    pub fade_ms: u32,
+    /// Confirm before removing a sound from the library.
+    pub confirm_remove: bool,
+    /// Show the sound duration in the table.
+    pub show_durations: bool,
+    /// Stop all sounds when the window loses focus.
+    pub stop_on_focus_loss: bool,
+    /// Maximum number of sounds that may play at the same time (1..=32).
+    pub max_voices: u32,
+}
+
+impl Default for PlaybackSettings {
+    fn default() -> Self {
+        Self {
+            resume_last_sound: false,
+            start_offset_secs: 0.0,
+            fade_ms: 0,
+            confirm_remove: false,
+            show_durations: true,
+            stop_on_focus_loss: false,
+            max_voices: 8,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -91,6 +170,9 @@ impl Default for Settings {
             close_behavior: CloseBehavior::Exit,
             copy_on_import: true,
             delete_managed_copy_on_remove: false,
+            theme: ThemeSettings::default(),
+            playback: PlaybackSettings::default(),
+            setup_done: false,
         }
     }
 }
@@ -105,6 +187,13 @@ fn clamp_unit(v: f32, fallback: f32) -> f32 {
 
 fn clean_device(name: Option<String>) -> Option<String> {
     name.filter(|n| !n.trim().is_empty())
+}
+
+/// True for a `#RRGGBB` / `#RGB` colour string.
+fn is_hex_color(text: &str) -> bool {
+    let t = text.trim();
+    let hex = t.strip_prefix('#').unwrap_or(t);
+    matches!(hex.len(), 3 | 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 impl Settings {
@@ -146,6 +235,27 @@ impl Settings {
         if self.language.trim().is_empty() {
             self.language = "en".to_string();
         }
+        // Appearance.
+        if !matches!(self.theme.variant.as_str(), "dark" | "midnight" | "light") {
+            self.theme.variant = "dark".to_string();
+        }
+        if !self.theme.accent.is_empty() && !is_hex_color(&self.theme.accent) {
+            self.theme.accent.clear();
+        }
+        self.theme.corner_radius = self.theme.corner_radius.clamp(0.0, 24.0);
+        self.theme.font_scale = if self.theme.font_scale.is_finite() {
+            self.theme.font_scale.clamp(12.0, 20.0)
+        } else {
+            15.0
+        };
+        // Playback.
+        self.playback.start_offset_secs = if self.playback.start_offset_secs.is_finite() {
+            self.playback.start_offset_secs.clamp(0.0, 600.0)
+        } else {
+            0.0
+        };
+        self.playback.fade_ms = self.playback.fade_ms.min(2000);
+        self.playback.max_voices = self.playback.max_voices.clamp(1, 32);
     }
 
     pub fn load(path: &Path) -> Result<(Settings, LoadStatus), StorageError> {

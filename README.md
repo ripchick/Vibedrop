@@ -46,6 +46,19 @@ status bar — no audio driver bundled or required, Windows, Linux and macOS sup
   only opened on request, never opened as an output, and the route's own recording side is
   refused as a voice source (feedback-loop protection).
 
+## First run
+
+VibeDrop opens with a setup wizard instead of the main window:
+
+* **Download the free VB-CABLE virtual audio cable** — fetches the official freeware package
+  from VB-Audio (vb-audio.com) into your data folder, with a progress bar. VB-CABLE is a
+  separate product by VB-Audio: it is not part of VibeDrop, is not redistributed here and
+  VibeDrop is not affiliated with VB-Audio. You install it once, as administrator, and pick
+  *CABLE Input* as the microphone route.
+* **Create a desktop shortcut** and **start VibeDrop when you log in** (Windows).
+
+The wizard can be opened again at any time from *File → Setup*.
+
 ## Features
 
 - Supported audio formats: **WAV**, **MP3** and **MP4/MOV/M4A** (via `symphonia`
@@ -69,6 +82,12 @@ status bar — no audio driver bundled or required, Windows, Linux and macOS sup
 - Settings organized into cards, classic soundboard look (grey surfaces, blue accents,
   compact menu bar, seekable progress bar), toasts instead of panics, keyboard-friendly focus
   handling.
+- **Deep customization** (Settings → Appearance): three themes (classic dark / midnight /
+  light), any accent colour, corner radius, font size, and per-panel visibility. Changes apply
+  immediately, without a restart.
+- **Your data is kept**: the library, the settings and the "recently played" list are stored in
+  your user profile and survive restarts and updates; Settings → Data folder can export and
+  import a backup.
 - Discord Rich Presence: the status shows **VibeDrop** while the app is open, and, while a
   sound plays, what you are listening to with the elapsed time (like Spotify).
   To show the app icon next to it, upload `assets/icon.png` in the Discord Developer Portal

@@ -128,6 +128,22 @@ struct HistoryItem {
 /// Messages from background helper threads.
 enum HelperMsg {
     Cable(Result<(), String>),
+    /// Progress of the VB-CABLE download: (received, total).
+    CableProgress(u64, u64),
+    /// The VB-CABLE package was downloaded to this path.
+    CableReady(String),
+}
+
+/// State of the first-run setup wizard.
+#[derive(Default, Clone)]
+struct SetupState {
+    download_cable: bool,
+    cable_progress: f32,
+    cable_status: String,
+    cable_done: bool,
+    desktop_shortcut: bool,
+    autostart: bool,
+    busy: bool,
 }
 
 struct ActiveDownload {
@@ -230,6 +246,8 @@ pub struct VibeDropApp {
     helper_tx: Sender<HelperMsg>,
 
     discord: crate::discord::DiscordPresence,
+    applied_theme: crate::settings::ThemeSettings,
+    setup: Option<SetupState>,
 
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
@@ -246,7 +264,7 @@ pub struct VibeDropApp {
 
 impl VibeDropApp {
     pub fn new(cc: &eframe::CreationContext<'_>, startup: Startup) -> Self {
-        theme::apply(&cc.egui_ctx);
+        theme::apply_settings(&cc.egui_ctx, &startup.settings.theme);
         if let Ok(mut guard) = startup.wake.lock() {
             *guard = Some(cc.egui_ctx.clone());
         }
@@ -278,6 +296,8 @@ impl VibeDropApp {
         );
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
+        let applied_theme = settings.theme.clone();
+        let setup_done = settings.setup_done;
         let (helper_tx, helper_rx) = unbounded::<HelperMsg>();
         let discord = crate::discord::DiscordPresence::start();
         let missing: HashSet<String> = library
@@ -316,6 +336,8 @@ impl VibeDropApp {
             helper_rx,
             helper_tx,
             discord,
+            applied_theme,
+            setup: if setup_done { None } else { Some(SetupState::default()) },
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -327,6 +349,7 @@ impl VibeDropApp {
             shut_down: false,
         };
         app.sync_index();
+        app.load_history();
         #[cfg(not(target_os = "android"))]
         app.init_hotkeys(hk_tx);
         #[cfg(target_os = "android")]
@@ -559,6 +582,63 @@ impl VibeDropApp {
         self.note_played(id, name);
     }
 
+    /// Write a backup of the library, settings and history next to the data folder.
+    fn export_backup(&self) -> Result<String, String> {
+        let backup = serde_json::json!({
+            "version": 1,
+            "library": serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&self.paths.library_file).unwrap_or_else(|_| "{}".into())).unwrap_or(serde_json::Value::Null),
+            "settings": serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&self.paths.settings_file).unwrap_or_else(|_| "{}".into())).unwrap_or(serde_json::Value::Null),
+            "history": self.history.iter().map(|h| serde_json::json!({"sound_id": h.sound_id, "name": h.name, "at": h.at})).collect::<Vec<_>>(),
+        });
+        let path = self.paths.root().join(format!("vibedrop-backup-{}.json", unix_now()));
+        let text = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
+        crate::fsutil::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())?;
+        Ok(path.display().to_string())
+    }
+
+    /// Restore a backup file into the library and settings.
+    fn import_backup(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let data: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        if let Some(lib) = data.get("library") {
+            let lib_text = serde_json::to_string(lib).map_err(|e| e.to_string())?;
+            crate::fsutil::write_atomic(&self.paths.library_file, lib_text.as_bytes()).map_err(|e| e.to_string())?;
+        }
+        if let Some(set) = data.get("settings") {
+            let set_text = serde_json::to_string(set).map_err(|e| e.to_string())?;
+            crate::fsutil::write_atomic(&self.paths.settings_file, set_text.as_bytes()).map_err(|e| e.to_string())?;
+        }
+        if let Some(items) = data.get("history").and_then(|v| v.as_array()) {
+            self.history.clear();
+            for item in items {
+                let (Some(sound_id), Some(name)) = (
+                    item.get("sound_id").and_then(|v| v.as_str()),
+                    item.get("name").and_then(|v| v.as_str()),
+                ) else {
+                    continue;
+                };
+                self.history.push_back(HistoryItem {
+                    sound_id: sound_id.to_string(),
+                    name: name.to_string(),
+                    at: item.get("at").and_then(|v| v.as_u64()).unwrap_or_else(unix_now),
+                });
+            }
+            self.history.truncate(HISTORY_MAX);
+            self.save_history();
+        }
+        Ok(())
+    }
+
+    /// Open the data folder in the file manager.
+    fn open_data_folder(&self) {
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("explorer").arg(self.paths.root()).spawn();
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(self.paths.root()).spawn();
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(self.paths.root()).spawn();
+    }
+
     fn note_played(&mut self, id: &str, name: String) {
         self.now_playing = Some(id.to_string());
         self.history.push_front(HistoryItem {
@@ -566,6 +646,42 @@ impl VibeDropApp {
             name,
             at: unix_now(),
         });
+        self.history.truncate(HISTORY_MAX);
+        self.save_history();
+    }
+
+    /// Keep the "recently played" list between sessions.
+    fn save_history(&self) {
+        let items: Vec<serde_json::Value> = self
+            .history
+            .iter()
+            .map(|h| serde_json::json!({"sound_id": h.sound_id, "name": h.name, "at": h.at}))
+            .collect();
+        if let Ok(text) = serde_json::to_string_pretty(&items) {
+            let _ = crate::fsutil::write_atomic(&self.paths.history_file, text.as_bytes());
+        }
+    }
+
+    fn load_history(&mut self) {
+        let Ok(text) = std::fs::read_to_string(&self.paths.history_file) else {
+            return;
+        };
+        let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else {
+            return;
+        };
+        for item in items {
+            let (Some(sound_id), Some(name)) = (
+                item.get("sound_id").and_then(|v| v.as_str()),
+                item.get("name").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            self.history.push_back(HistoryItem {
+                sound_id: sound_id.to_string(),
+                name: name.to_string(),
+                at: item.get("at").and_then(|v| v.as_u64()).unwrap_or_else(unix_now),
+            });
+        }
         self.history.truncate(HISTORY_MAX);
     }
 
@@ -1095,6 +1211,23 @@ impl VibeDropApp {
                     ),
                     Err(e) => self.toast(ToastKind::Error, e),
                 },
+                HelperMsg::CableProgress(received, total) => {
+                    if let Some(setup) = self.setup.as_mut() {
+                        setup.cable_progress = if total > 0 {
+                            (received as f32 / total as f64 as f32).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                    }
+                }
+                HelperMsg::CableReady(path) => {
+                    if let Some(setup) = self.setup.as_mut() {
+                        setup.cable_done = true;
+                        setup.busy = false;
+                        setup.cable_status = path.clone();
+                    }
+                    self.toast(ToastKind::Success, lang::t(&lang, "VB-CABLE downloaded"));
+                }
             }
         }
 
@@ -1194,7 +1327,7 @@ impl VibeDropApp {
             ));
             let screen = ctx.screen_rect();
             painter.rect_filled(screen, 0.0, Color32::from_black_alpha(190));
-            painter.rect_stroke(screen.shrink(18.0), 16.0, Stroke::new(2.0_f32, theme::ACCENT));
+            painter.rect_stroke(screen.shrink(18.0), 16.0, Stroke::new(2.0_f32, theme::c_accent()));
             let text = if lang::ru(&self.settings.language) {
                 "Перетащите файлы WAV / MP3 сюда для импорта"
             } else {
@@ -1205,7 +1338,7 @@ impl VibeDropApp {
                 Align2::CENTER_CENTER,
                 text,
                 egui::FontId::proportional(24.0),
-                theme::ACCENT,
+                theme::c_accent(),
             );
         }
     }
@@ -1231,8 +1364,8 @@ impl VibeDropApp {
                 .resizable(false)
                 .frame(
                     egui::Frame::none()
-                        .fill(theme::SIDEBAR)
-                        .stroke(Stroke::new(1.0_f32, theme::BORDER))
+                        .fill(theme::c_sidebar())
+                        .stroke(Stroke::new(1.0_f32, theme::c_border()))
                         .inner_margin(egui::Margin::symmetric(8.0, 6.0)),
                 )
                 .show(ctx, |ui| {
@@ -1281,8 +1414,8 @@ impl VibeDropApp {
             .resizable(false)
             .frame(
                 egui::Frame::none()
-                    .fill(theme::SIDEBAR)
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
+                    .fill(theme::c_sidebar())
+                    .stroke(Stroke::new(1.0_f32, theme::c_border()))
                     .inner_margin(egui::Margin::symmetric(12.0, 14.0)),
             )
             .show(ctx, |ui| {
@@ -1293,10 +1426,15 @@ impl VibeDropApp {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
-                            ui.label(RichText::new("Vibe").size(18.0).strong().color(theme::TEXT));
-                            ui.label(RichText::new("Drop").size(18.0).strong().color(theme::ACCENT));
+                            ui.label(RichText::new("Vibe").size(18.0).strong().color(theme::c_text()));
+                            ui.label(RichText::new("Drop").size(18.0).strong().color(theme::c_accent()));
                         });
-                        ui.label(RichText::new("SOUNDBOARD").size(9.0).strong().color(theme::TEXT_FAINT));
+                        ui.label(
+                            RichText::new("SOUNDBOARD")
+                                .size(9.0)
+                                .strong()
+                                .color(theme::c_text_faint()),
+                        );
                     });
                 });
                 ui.add_space(12.0);
@@ -1304,7 +1442,7 @@ impl VibeDropApp {
                     RichText::new(lang::t(&lang, "CATEGORY"))
                         .size(10.5)
                         .strong()
-                        .color(theme::TEXT_FAINT),
+                        .color(theme::c_text_faint()),
                 );
                 ui.add_space(3.0);
                 for page in Page::ALL {
@@ -1314,7 +1452,15 @@ impl VibeDropApp {
                         lang::t(&lang, page.title())
                     };
                     let icon = if page == Page::Library { Icon::Home } else { page.icon() };
-                    if theme::nav_item(ui, icon, label, self.page == page).clicked() {
+                    if theme::nav_item(
+                        ui,
+                        icon,
+                        label,
+                        self.page == page,
+                        self.settings.theme.show_sidebar_labels,
+                    )
+                    .clicked()
+                    {
                         self.page = page;
                         if page == Page::Settings {
                             self.protocol_state = system::protocol_state();
@@ -1328,8 +1474,16 @@ impl VibeDropApp {
                 } else {
                     format!("{} sounds · {} favorites", self.library.len(), favorites)
                 };
-                ui.label(RichText::new(counts).size(12.0).color(theme::TEXT_FAINT));
-                if theme::nav_item(ui, Icon::Quit, lang::t(&lang, "Quit VibeDrop"), false).clicked() {
+                ui.label(RichText::new(counts).size(12.0).color(theme::c_text_faint()));
+                if theme::nav_item(
+                    ui,
+                    Icon::Quit,
+                    lang::t(&lang, "Quit VibeDrop"),
+                    false,
+                    self.settings.theme.show_sidebar_labels,
+                )
+                .clicked()
+                {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -1345,6 +1499,7 @@ impl VibeDropApp {
         let mut want_quit = false;
         let mut want_about = false;
         let mut want_cable_page = false;
+        let mut want_setup = false;
         let mut go_page: Option<Page> = None;
         let mut stop_all = false;
 
@@ -1352,11 +1507,18 @@ impl VibeDropApp {
             .exact_height(28.0)
             .frame(
                 egui::Frame::none()
-                    .fill(theme::SIDEBAR)
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
+                    .fill(theme::c_sidebar())
                     .inner_margin(egui::Margin::symmetric(6.0, 2.0)),
             )
             .show(ctx, |ui| {
+                // Flat menu items: no button frame, just the text (classic soundpad look).
+                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+                ui.style_mut().visuals.widgets.inactive.bg_stroke = Stroke::NONE;
+                ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                ui.style_mut().visuals.widgets.hovered.bg_fill = theme::c_card_hover();
+                ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+                ui.style_mut().visuals.widgets.open.bg_fill = theme::c_card_hover();
+                ui.style_mut().visuals.widgets.open.bg_stroke = Stroke::NONE;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
 
@@ -1372,6 +1534,10 @@ impl VibeDropApp {
                         }
                         if ui.button(lang::t(&lang, "Check files")).clicked() {
                             want_check = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(lang::t(&lang, "Setup")).clicked() {
+                            want_setup = true;
                             ui.close_menu();
                         }
                         ui.separator();
@@ -1447,6 +1613,9 @@ impl VibeDropApp {
         if want_cable_page {
             ctx.open_url(egui::OpenUrl::new_tab("https://vb-audio.com/Cable/"));
         }
+        if want_setup {
+            self.setup = Some(SetupState::default());
+        }
         if want_about {
             self.about = true;
         }
@@ -1467,48 +1636,61 @@ impl VibeDropApp {
         let mut toggle = false;
         let mut levels_changed = false;
         let mut seek: Option<f32> = None;
-        egui::TopBottomPanel::top("transport")
-            .exact_height(42.0)
-            .frame(
-                egui::Frame::none()
-                    .fill(theme::SIDEBAR)
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(10.0, 5.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let icon = if playing { Icon::Stop } else { Icon::Play };
-                    if theme::toolbar_button(ui, icon, lang::t(&lang, "Play")).clicked() {
-                        toggle = true;
-                    }
-                    let time_text = match progress {
-                        Some((pos, total)) => format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total)),
-                        None => "0:00".to_string(),
-                    };
-                    ui.label(RichText::new(time_text).monospace().size(12.5).color(theme::TEXT_DIM));
-                    let bar_w = (ui.available_width() - 210.0).max(120.0);
-                    let (rect, resp) = ui.allocate_exact_size(vec2(bar_w, 6.0), Sense::click_and_drag());
-                    ui.painter().rect_filled(rect, 3.0, theme::BORDER);
-                    let frac = match progress {
-                        Some((pos, total)) if total > 0.0 => (pos / total).clamp(0.0, 1.0) as f32,
-                        _ => 0.0,
-                    };
-                    let filled = egui::Rect::from_min_size(rect.min, vec2(bar_w * frac, 6.0));
-                    ui.painter().rect_filled(filled, 3.0, theme::ACCENT);
-                    if progress.is_some() && (resp.clicked() || resp.dragged()) {
-                        if let Some(pos) = resp.interact_pointer_pos() {
-                            let f = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
-                            seek = Some(f);
+        if self.settings.theme.show_transport {
+            egui::TopBottomPanel::top("transport")
+                .exact_height(42.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(theme::c_sidebar())
+                        .stroke(Stroke::new(1.0_f32, theme::c_border()))
+                        .inner_margin(egui::Margin::symmetric(10.0, 5.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let icon = if playing { Icon::Stop } else { Icon::Play };
+                        if theme::toolbar_button(ui, icon, lang::t(&lang, "Play")).clicked() {
+                            toggle = true;
                         }
-                    }
-                    let (icon_rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                    theme::paint_icon(ui.painter(), Icon::Headphones, icon_rect.center(), 18.0, theme::ACCENT);
-                    ui.spacing_mut().slider_width = 120.0;
-                    levels_changed |=
-                        volume_row_inline(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
+                        let time_text = match progress {
+                            Some((pos, total)) => format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total)),
+                            None => "0:00".to_string(),
+                        };
+                        ui.label(
+                            RichText::new(time_text)
+                                .monospace()
+                                .size(12.5)
+                                .color(theme::c_text_dim()),
+                        );
+                        let bar_w = (ui.available_width() - 210.0).max(120.0);
+                        let (rect, resp) = ui.allocate_exact_size(vec2(bar_w, 6.0), Sense::click_and_drag());
+                        ui.painter().rect_filled(rect, 3.0, theme::c_border());
+                        let frac = match progress {
+                            Some((pos, total)) if total > 0.0 => (pos / total).clamp(0.0, 1.0) as f32,
+                            _ => 0.0,
+                        };
+                        let filled = egui::Rect::from_min_size(rect.min, vec2(bar_w * frac, 6.0));
+                        ui.painter().rect_filled(filled, 3.0, theme::c_accent());
+                        if progress.is_some() && (resp.clicked() || resp.dragged()) {
+                            if let Some(pos) = resp.interact_pointer_pos() {
+                                let f = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
+                                seek = Some(f);
+                            }
+                        }
+                        let (icon_rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+                        theme::paint_icon(
+                            ui.painter(),
+                            Icon::Headphones,
+                            icon_rect.center(),
+                            18.0,
+                            theme::c_accent(),
+                        );
+                        ui.spacing_mut().slider_width = 120.0;
+                        levels_changed |=
+                            volume_row_inline(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
+                    });
                 });
-            });
+        }
         if levels_changed {
             self.engine.set_levels(self.levels());
             self.settings_dirty = true;
@@ -1535,83 +1717,85 @@ impl VibeDropApp {
         let mut open_settings = false;
         let mut stop_all = false;
         let mut mic_click = false;
-        egui::TopBottomPanel::bottom("infobar")
-            .exact_height(44.0)
-            .frame(
-                egui::Frame::none()
-                    .fill(theme::SIDEBAR)
-                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(12.0, 7.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    let (icon_rect, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-                    theme::paint_icon(ui.painter(), Icon::Home, icon_rect.center(), 22.0, theme::ACCENT);
-                    ui.label(
-                        RichText::new(lang::t(&lang, self.page.title()))
-                            .size(14.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(format!("{}: {}", lang::t(&lang, "Sounds"), self.library.len()))
-                            .size(12.5)
-                            .color(theme::TEXT_DIM),
-                    );
-                    ui.label(
-                        RichText::new(format!("{}: {}", lang::t(&lang, "Plays"), self.history.len()))
-                            .size(12.5)
-                            .color(theme::TEXT_DIM),
-                    );
-                    if self.discord.status() == crate::discord::DiscordStatus::Connected {
-                        ui.label(RichText::new("Discord").size(12.5).color(theme::ACCENT));
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if theme::toolbar_button(ui, Icon::Wrench, lang::t(&lang, "Settings")).clicked() {
-                            open_settings = true;
+        if self.settings.theme.show_status_bar {
+            egui::TopBottomPanel::bottom("infobar")
+                .exact_height(44.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(theme::c_sidebar())
+                        .stroke(Stroke::new(1.0_f32, theme::c_border()))
+                        .inner_margin(egui::Margin::symmetric(12.0, 7.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        let (icon_rect, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
+                        theme::paint_icon(ui.painter(), Icon::Home, icon_rect.center(), 22.0, theme::c_accent());
+                        ui.label(
+                            RichText::new(lang::t(&lang, self.page.title()))
+                                .size(14.0)
+                                .strong()
+                                .color(theme::c_text()),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(format!("{}: {}", lang::t(&lang, "Sounds"), self.library.len()))
+                                .size(12.5)
+                                .color(theme::c_text_dim()),
+                        );
+                        ui.label(
+                            RichText::new(format!("{}: {}", lang::t(&lang, "Plays"), self.history.len()))
+                                .size(12.5)
+                                .color(theme::c_text_dim()),
+                        );
+                        if self.discord.status() == crate::discord::DiscordStatus::Connected {
+                            ui.label(RichText::new("Discord").size(12.5).color(theme::c_accent()));
                         }
-                        if theme::toolbar_button(ui, Icon::StopAll, lang::t(&lang, "Stop All")).clicked() {
-                            stop_all = true;
-                        }
-                        let (text, color, filled, tip) = if !self.settings.secondary_enabled {
-                            (
-                                lang::t(&lang, "MIC OFF"),
-                                theme::TEXT_DIM,
-                                false,
-                                lang::t(&lang, "The microphone route is off. Click to set it up."),
-                            )
-                        } else if mic_state.is_active() {
-                            if self.settings.mic_muted {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if theme::toolbar_button(ui, Icon::Wrench, lang::t(&lang, "Settings")).clicked() {
+                                open_settings = true;
+                            }
+                            if theme::toolbar_button(ui, Icon::StopAll, lang::t(&lang, "Stop All")).clicked() {
+                                stop_all = true;
+                            }
+                            let (text, color, filled, tip) = if !self.settings.secondary_enabled {
                                 (
-                                    lang::t(&lang, "MIC MUTED"),
-                                    theme::WARNING,
+                                    lang::t(&lang, "MIC OFF"),
+                                    theme::c_text_dim(),
                                     false,
-                                    lang::t(&lang, "Sounds are not sent to the microphone. Click to unmute."),
+                                    lang::t(&lang, "The microphone route is off. Click to set it up."),
                                 )
+                            } else if mic_state.is_active() {
+                                if self.settings.mic_muted {
+                                    (
+                                        lang::t(&lang, "MIC MUTED"),
+                                        theme::c_warning(),
+                                        false,
+                                        lang::t(&lang, "Sounds are not sent to the microphone. Click to unmute."),
+                                    )
+                                } else {
+                                    (
+                                        lang::t(&lang, "MIC ON"),
+                                        theme::c_accent(),
+                                        true,
+                                        lang::t(&lang, "Sounds are sent to the microphone route. Click to mute it."),
+                                    )
+                                }
                             } else {
                                 (
-                                    lang::t(&lang, "MIC ON"),
-                                    theme::ACCENT,
-                                    true,
-                                    lang::t(&lang, "Sounds are sent to the microphone route. Click to mute it."),
+                                    lang::t(&lang, "MIC !"),
+                                    theme::c_danger(),
+                                    false,
+                                    lang::t(&lang, "The microphone route has a problem. Click to open Settings."),
                                 )
+                            };
+                            if theme::chip(ui, text, color, filled).on_hover_text(tip).clicked() {
+                                mic_click = true;
                             }
-                        } else {
-                            (
-                                lang::t(&lang, "MIC !"),
-                                theme::DANGER,
-                                false,
-                                lang::t(&lang, "The microphone route has a problem. Click to open Settings."),
-                            )
-                        };
-                        if theme::chip(ui, text, color, filled).on_hover_text(tip).clicked() {
-                            mic_click = true;
-                        }
+                        });
                     });
                 });
-            });
+        }
         if mic_click {
             if self.settings.secondary_enabled && mic_state.is_active() {
                 self.toggle_mic_mute();
@@ -1672,11 +1856,11 @@ impl VibeDropApp {
             return;
         }
         let mut open_settings = false;
-        theme::card().show(ui, |ui| {
+        theme::frame_card().show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.vertical(|ui| {
                     for (text, severe) in &lines {
-                        let color = if *severe { theme::DANGER } else { theme::WARNING };
+                        let color = if *severe { theme::c_danger() } else { theme::c_warning() };
                         ui.label(RichText::new(format!("\u{25CF} {text}")).size(13.0).color(color));
                     }
                 });
@@ -1697,7 +1881,7 @@ impl VibeDropApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(theme::BG)
+                    .fill(theme::c_bg())
                     .inner_margin(egui::Margin::symmetric(26.0, 20.0)),
             )
             .show(ctx, |ui| {
@@ -1757,7 +1941,13 @@ impl VibeDropApp {
         theme::inset().show(ui, |ui| {
             ui.horizontal(|ui| {
                 let (icon_rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                theme::paint_icon(ui.painter(), Icon::Search, icon_rect.center(), 15.0, theme::TEXT_FAINT);
+                theme::paint_icon(
+                    ui.painter(),
+                    Icon::Search,
+                    icon_rect.center(),
+                    15.0,
+                    theme::c_text_faint(),
+                );
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)
                         .frame(false)
@@ -1773,7 +1963,7 @@ impl VibeDropApp {
         ids.sort_unstable();
         for id in ids {
             let Some(dl) = self.downloads.get(&id) else { continue };
-            theme::card().show(ui, |ui| {
+            theme::frame_card().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     let text = if lang::ru(&lang) {
@@ -1781,7 +1971,7 @@ impl VibeDropApp {
                     } else {
                         format!("Downloading {}", dl.label)
                     };
-                    ui.label(RichText::new(text).color(theme::TEXT));
+                    ui.label(RichText::new(text).color(theme::c_text()));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::secondary_button(ui, lang::t(&lang, "Cancel")).clicked() {
                             cancel = Some(id);
@@ -1793,7 +1983,7 @@ impl VibeDropApp {
                             }
                             _ => format!("{:.1} MiB", dl.received as f64 / MIB),
                         };
-                        ui.label(RichText::new(text).color(theme::TEXT_DIM));
+                        ui.label(RichText::new(text).color(theme::c_text_dim()));
                     });
                 });
             });
@@ -1808,7 +1998,7 @@ impl VibeDropApp {
         let mut retry: Option<usize> = None;
         let mut dismiss: Option<usize> = None;
         for (i, failed) in self.failed_downloads.iter().enumerate() {
-            theme::card().show(ui, |ui| {
+            theme::frame_card().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
@@ -1817,8 +2007,8 @@ impl VibeDropApp {
                         } else {
                             format!("Download failed: {}", failed.label)
                         };
-                        ui.label(RichText::new(text).strong().color(theme::DANGER));
-                        ui.label(RichText::new(&failed.error).size(12.5).color(theme::TEXT_DIM));
+                        ui.label(RichText::new(text).strong().color(theme::c_danger()));
+                        ui.label(RichText::new(&failed.error).size(12.5).color(theme::c_text_dim()));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::secondary_button(ui, lang::t(&lang, "Dismiss")).clicked() {
@@ -1888,7 +2078,7 @@ impl VibeDropApp {
         let mut action: Option<Action> = None;
         if rows.is_empty() {
             ui.add_space(44.0);
-            theme::card().show(ui, |ui| {
+            theme::frame_card().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.vertical_centered(|ui| {
                     let (title, hint) = if !query.trim().is_empty() {
@@ -1910,8 +2100,8 @@ impl VibeDropApp {
                             ),
                         )
                     };
-                    ui.label(RichText::new(title).size(22.0).strong().color(theme::TEXT));
-                    ui.label(RichText::new(hint).color(theme::TEXT_DIM));
+                    ui.label(RichText::new(title).size(22.0).strong().color(theme::c_text()));
+                    ui.label(RichText::new(hint).color(theme::c_text_dim()));
                 });
             });
         } else {
@@ -1920,13 +2110,13 @@ impl VibeDropApp {
                     ui.horizontal(|ui| {
                         ui.add_sized(
                             vec2(30.0, 20.0),
-                            egui::Label::new(RichText::new("#").size(12.0).strong().color(theme::TEXT_FAINT)),
+                            egui::Label::new(RichText::new("#").size(12.0).strong().color(theme::c_text_faint())),
                         );
                         ui.label(
                             RichText::new(lang::t(&lang, "Name"))
                                 .size(12.0)
                                 .strong()
-                                .color(theme::TEXT_FAINT),
+                                .color(theme::c_text_faint()),
                         );
                     });
                     ui.separator();
@@ -1962,11 +2152,15 @@ impl VibeDropApp {
                 ui.set_min_height(38.0);
                 if row.playing {
                     let (bar, _) = ui.allocate_exact_size(vec2(3.0, 32.0), Sense::hover());
-                    ui.painter().rect_filled(bar, Rounding::same(2.0), theme::ACCENT);
+                    ui.painter().rect_filled(bar, Rounding::same(2.0), theme::c_accent());
                 }
                 ui.add_sized(
                     vec2(28.0, 20.0),
-                    egui::Label::new(RichText::new(number.to_string()).size(12.5).color(theme::TEXT_FAINT)),
+                    egui::Label::new(
+                        RichText::new(number.to_string())
+                            .size(12.5)
+                            .color(theme::c_text_faint()),
+                    ),
                 );
                 let icon = if row.playing { Icon::Stop } else { Icon::Play };
                 if theme::round_button(ui, icon, 32.0, true, !row.missing).clicked() {
@@ -1980,12 +2174,20 @@ impl VibeDropApp {
                 ui.allocate_ui_with_layout(vec2(name_w, 38.0), Layout::top_down(Align::Min), |ui| {
                     ui.set_width(name_w);
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let name_color = if row.playing { theme::ACCENT } else { theme::TEXT };
+                    let name_color = if row.playing {
+                        theme::c_accent()
+                    } else {
+                        theme::c_text()
+                    };
                     ui.add(
                         egui::Label::new(RichText::new(&row.name).size(15.0).strong().color(name_color))
                             .wrap_mode(egui::TextWrapMode::Truncate),
                     );
-                    let meta_color = if row.missing { theme::DANGER } else { theme::TEXT_DIM };
+                    let meta_color = if row.missing {
+                        theme::c_danger()
+                    } else {
+                        theme::c_text_dim()
+                    };
                     ui.add(
                         egui::Label::new(RichText::new(&row.meta).size(12.0).color(meta_color))
                             .wrap_mode(egui::TextWrapMode::Truncate),
@@ -2018,7 +2220,7 @@ impl VibeDropApp {
                         ui.label(
                             RichText::new(lang::t(lang, "Sound volume"))
                                 .size(12.5)
-                                .color(theme::TEXT_DIM),
+                                .color(theme::c_text_dim()),
                         );
                         let mut volume = row.volume;
                         let slider = egui::Slider::new(&mut volume, 0.0..=MAX_ENTRY_VOLUME)
@@ -2028,7 +2230,7 @@ impl VibeDropApp {
                         }
                         ui.separator();
                         if ui
-                            .button(RichText::new(lang::t(lang, "Remove from library")).color(theme::DANGER))
+                            .button(RichText::new(lang::t(lang, "Remove from library")).color(theme::c_danger()))
                             .clicked()
                         {
                             *action = Some(Action::Remove(row.id.clone()));
@@ -2050,9 +2252,13 @@ impl VibeDropApp {
                     }
 
                     let (text, color, filled) = match (&row.hotkey, row.hotkey_inactive) {
-                        (Some(h), false) => (h.clone(), theme::ACCENT, true),
-                        (Some(h), true) => (format!("{h} {}", lang::t(lang, "(inactive)")), theme::WARNING, false),
-                        (None, _) => (lang::t(lang, "+ Hotkey").to_string(), theme::TEXT_DIM, false),
+                        (Some(h), false) => (h.clone(), theme::c_accent(), true),
+                        (Some(h), true) => (
+                            format!("{h} {}", lang::t(lang, "(inactive)")),
+                            theme::c_warning(),
+                            false,
+                        ),
+                        (None, _) => (lang::t(lang, "+ Hotkey").to_string(), theme::c_text_dim(), false),
                     };
                     let tip = if row.hotkey_inactive && row.hotkey.is_some() {
                         lang::t(
@@ -2142,6 +2348,177 @@ impl VibeDropApp {
         self.discord.set(details, state, started);
     }
 
+    // ---- First-run setup wizard -----------------------------------------------------------
+
+    /// The setup wizard shown on the first launch: the user picks what to install
+    /// (the free VB-CABLE virtual cable, a desktop shortcut, autostart) and VibeDrop
+    /// performs the steps before the main window appears.
+    fn draw_setup(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.language.clone();
+        let mut install = false;
+        let mut finish = false;
+        let mut open_cable_folder = false;
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::c_bg())
+                    .inner_margin(egui::Margin::symmetric(40.0, 32.0)),
+            )
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    let (mark, _) = ui.allocate_exact_size(vec2(86.0, 86.0), Sense::hover());
+                    theme::brand_mark(ui.painter(), mark);
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.label(RichText::new("Vibe").size(34.0).strong().color(theme::c_text()));
+                        ui.label(RichText::new("Drop").size(34.0).strong().color(theme::c_accent()));
+                    });
+                    ui.label(
+                        RichText::new(lang::t(&lang, "Setup — soundboard for voice chats"))
+                            .size(14.0)
+                            .color(theme::c_text_dim()),
+                    );
+                    ui.add_space(22.0);
+                    let mut state = self.setup.clone().unwrap_or_default();
+                    theme::frame_card().show(ui, |ui| {
+                        ui.set_width(560.0);
+                        theme::section_title(ui, lang::t(&lang, "WHAT TO INSTALL"));
+                        ui.add_space(6.0);
+                        ui.checkbox(
+                            &mut state.download_cable,
+                            lang::t(&lang, "Download the free VB-CABLE virtual audio cable"),
+                        );
+                        ui.label(
+                            RichText::new(lang::t(
+                                &lang,
+                                "VB-CABLE is freeware by VB-Audio, downloaded from the official site (vb-audio.com). VibeDrop is an independent project and is not affiliated with VB-Audio; the driver itself is not part of VibeDrop and is never redistributed here.",
+                            ))
+                            .size(11.5)
+                            .color(theme::c_text_faint()),
+                        );
+                        ui.hyperlink_to(
+                            lang::t(&lang, "Open the official VB-CABLE page"),
+                            "https://vb-audio.com/Cable/",
+                        );
+                        ui.add_space(8.0);
+                        ui.checkbox(
+                            &mut state.desktop_shortcut,
+                            lang::t(&lang, "Create a desktop shortcut"),
+                        );
+                        ui.checkbox(
+                            &mut state.autostart,
+                            lang::t(&lang, "Start VibeDrop when I log in"),
+                        );
+                        ui.add_space(10.0);
+                        if state.download_cable {
+                            if state.cable_done {
+                                ui.label(
+                                    RichText::new(lang::t(&lang, "VB-CABLE downloaded:"))
+                                        .color(theme::c_accent()),
+                                );
+                                ui.label(
+                                    RichText::new(state.cable_status.clone())
+                                        .size(11.5)
+                                        .color(theme::c_text_faint()),
+                                );
+                                if theme::secondary_button(ui, lang::t(&lang, "Open the folder")).clicked() {
+                                    open_cable_folder = true;
+                                }
+                            } else {
+                                ui.label(RichText::new(lang::t(&lang, "Downloading…")).color(theme::c_text_dim()));
+                                let _ = egui::ProgressBar::new(state.cable_progress)
+                                    .desired_width(520.0);
+                            }
+                        }
+                    });
+
+                    ui.add_space(18.0);
+                    ui.horizontal(|ui| {
+                        if theme::secondary_button(ui, lang::t(&lang, "Skip")).clicked() {
+                            finish = true;
+                        }
+                        if state.cable_done {
+                            if theme::primary_button(ui, lang::t(&lang, "Start VibeDrop")).clicked() {
+                                finish = true;
+                            }
+                        } else {
+                            if theme::primary_button(ui, lang::t(&lang, "Install")).clicked() {
+                                install = true;
+                            }
+                        }
+                    });
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new(lang::t(
+                            &lang,
+                            "VibeDrop is free and open source (Apache-2.0). Your library and settings are stored in your user profile and never leave your computer.",
+                        ))
+                        .size(11.5)
+                        .color(theme::c_text_faint()),
+                    );
+                    if let Some(setup) = self.setup.as_mut() {
+                        setup.download_cable = state.download_cable;
+                        setup.desktop_shortcut = state.desktop_shortcut;
+                        setup.autostart = state.autostart;
+                        setup.cable_progress = state.cable_progress;
+                        setup.cable_status = state.cable_status.clone();
+                        setup.cable_done = state.cable_done;
+                    }
+                });
+            });
+
+        if install {
+            self.run_setup();
+        }
+        if open_cable_folder {
+            let dir = self
+                .paths
+                .root()
+                .parent()
+                .map(|p| p.join("Downloads"))
+                .unwrap_or_else(|| self.paths.root().to_path_buf());
+            let _ = std::process::Command::new("explorer").arg(dir).spawn();
+        }
+        if finish {
+            self.settings.setup_done = true;
+            self.settings_dirty = true;
+            self.save_settings();
+            self.setup = None;
+        }
+    }
+
+    /// Perform the steps the user selected in the setup wizard.
+    fn run_setup(&mut self) {
+        let Some(setup) = self.setup.as_mut() else {
+            return;
+        };
+        if setup.busy {
+            return;
+        }
+        setup.busy = true;
+        if setup.desktop_shortcut {
+            let _ = system::create_desktop_shortcut();
+        }
+        if setup.autostart {
+            let _ = system::set_autostart(true);
+        }
+        if setup.download_cable && !setup.cable_done {
+            let tx = self.helper_tx.clone();
+            let dest = self.paths.root().join("VBCABLE_Driver_Pack45.zip");
+            std::thread::spawn(move || match download_vbcable_with_progress(&dest, &tx) {
+                Ok(()) => {
+                    let _ = tx.send(HelperMsg::CableReady(dest.display().to_string()));
+                }
+                Err(e) => {
+                    let _ = tx.send(HelperMsg::Cable(Err(e)));
+                }
+            });
+        } else {
+            setup.busy = false;
+        }
+    }
+
     // ---- Drawing: history --------------------------------------------------------------------
 
     fn draw_history_page(&mut self, ui: &mut Ui) {
@@ -2166,9 +2543,11 @@ impl VibeDropApp {
                     RichText::new(lang::t(&lang, "Nothing played yet"))
                         .size(20.0)
                         .strong()
-                        .color(theme::TEXT),
+                        .color(theme::c_text()),
                 );
-                ui.label(RichText::new(lang::t(&lang, "Sounds you play will show up here.")).color(theme::TEXT_DIM));
+                ui.label(
+                    RichText::new(lang::t(&lang, "Sounds you play will show up here.")).color(theme::c_text_dim()),
+                );
             });
         } else {
             let now = unix_now();
@@ -2177,14 +2556,14 @@ impl VibeDropApp {
                     ui.spacing_mut().item_spacing.y = 8.0;
                     for item in &self.history {
                         let exists = self.library.get(&item.sound_id).is_some();
-                        theme::card().show(ui, |ui| {
+                        theme::frame_card().show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
                                 ui.set_min_height(36.0);
                                 if theme::round_button(ui, Icon::Play, 32.0, false, exists).clicked() {
                                     play = Some(item.sound_id.clone());
                                 }
-                                let color = if exists { theme::TEXT } else { theme::TEXT_FAINT };
+                                let color = if exists { theme::c_text() } else { theme::c_text_faint() };
                                 let name_width = (ui.available_width() - 130.0).max(100.0);
                                 ui.allocate_ui_with_layout(
                                     vec2(name_width, 36.0),
@@ -2201,7 +2580,7 @@ impl VibeDropApp {
                                     ui.label(
                                         RichText::new(theme::fmt_ago(now, item.at))
                                             .size(12.5)
-                                            .color(theme::TEXT_DIM),
+                                            .color(theme::c_text_dim()),
                                     );
                                 });
                             });
@@ -2214,6 +2593,7 @@ impl VibeDropApp {
 
         if clear {
             self.history.clear();
+            self.save_history();
         }
         if let Some(id) = play {
             self.play_sound(&id);
@@ -2245,6 +2625,9 @@ impl VibeDropApp {
         let has_virtual = devices.outputs.iter().any(|n| is_virtual_device(n));
         let mut register = false;
         let mut unregister = false;
+        let mut export_backup = false;
+        let mut import_backup = false;
+        let mut open_data_folder = false;
 
         page_header(
             ui,
@@ -2257,7 +2640,7 @@ impl VibeDropApp {
                 ui.spacing_mut().item_spacing.y = 14.0;
 
                 // Audio devices.
-                theme::card().show(ui, |ui| {
+                theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "AUDIO DEVICES"));
                     ui.label(
@@ -2265,13 +2648,13 @@ impl VibeDropApp {
                             &lang,
                             "VibeDrop plays every sound on up to two routes at the same time: your headphones, and a microphone route that voice chats such as Discord can pick up. Output devices (playback) and input devices (microphones) are different things and are chosen separately.",
                         ))
-                        .color(theme::TEXT_DIM),
+                        .color(theme::c_text_dim()),
                     );
 
                     // Headphones / speakers.
                     ui.add_space(6.0);
-                    ui.label(RichText::new(lang::t(&lang, "Headphones or speakers")).strong().color(theme::TEXT));
-                    ui.label(RichText::new(lang::t(&lang, "What you hear.")).size(12.5).color(theme::TEXT_FAINT));
+                    ui.label(RichText::new(lang::t(&lang, "Headphones or speakers")).strong().color(theme::c_text()));
+                    ui.label(RichText::new(lang::t(&lang, "What you hear.")).size(12.5).color(theme::c_text_faint()));
                     ui.horizontal(|ui| {
                         device_combo(
                             ui,
@@ -2291,14 +2674,14 @@ impl VibeDropApp {
                     ui.add_space(10.0);
                     ui.separator();
                     ui.add_space(4.0);
-                    ui.label(RichText::new(lang::t(&lang, "Microphone route")).strong().color(theme::TEXT));
+                    ui.label(RichText::new(lang::t(&lang, "Microphone route")).strong().color(theme::c_text()));
                     ui.label(
                         RichText::new(lang::t(
                             &lang,
                             "What other people hear. Play into a virtual audio cable (e.g. CABLE Input); voice chats then use its recording side as their microphone.",
                         ))
                         .size(12.5)
-                        .color(theme::TEXT_FAINT),
+                        .color(theme::c_text_faint()),
                     );
                     ui.checkbox(
                         &mut self.settings.secondary_enabled,
@@ -2340,9 +2723,9 @@ impl VibeDropApp {
                     }
                     if let Some(report) = &self.route_test {
                         let color = match report.level {
-                            ReportLevel::Ok => theme::ACCENT,
-                            ReportLevel::Warning => theme::WARNING,
-                            ReportLevel::Failure => theme::DANGER,
+                            ReportLevel::Ok => theme::c_accent(),
+                            ReportLevel::Warning => theme::c_warning(),
+                            ReportLevel::Failure => theme::c_danger(),
                         };
                         ui.label(RichText::new(lang::tx(&lang, &report.message)).size(12.5).color(color));
                     }
@@ -2360,7 +2743,7 @@ impl VibeDropApp {
                             )
                             .to_string()
                         };
-                        ui.label(RichText::new(msg).size(12.5).color(theme::WARNING));
+                        ui.label(RichText::new(msg).size(12.5).color(theme::c_warning()));
                     } else if self.settings.secondary_enabled {
                         if let Some(name) = &self.settings.secondary_output {
                             if devices.scanned && devices.outputs.contains(name) && !is_virtual_device(name) {
@@ -2370,7 +2753,7 @@ impl VibeDropApp {
                                         "This does not look like a virtual audio cable. Sound will only reach a voice chat if something routes this device into a microphone.",
                                     ))
                                     .size(12.5)
-                                    .color(theme::WARNING),
+                                    .color(theme::c_warning()),
                                 );
                             }
                         }
@@ -2385,7 +2768,7 @@ impl VibeDropApp {
                                     } else {
                                         format!("In Discord (or your game) choose \"{input}\" as the microphone.")
                                     };
-                                    (text, theme::ACCENT)
+                                    (text, theme::c_accent())
                                 }
                                 None => {
                                     let text = if ru {
@@ -2393,7 +2776,7 @@ impl VibeDropApp {
                                     } else {
                                         format!("VibeDrop could not find the recording side of \"{device}\" among the recording devices. Look for its matching \"Output\" device in your voice chat.")
                                     };
-                                    (text, theme::WARNING)
+                                    (text, theme::c_warning())
                                 }
                             };
                             ui.label(RichText::new(text).size(12.5).strong().color(color));
@@ -2408,7 +2791,7 @@ impl VibeDropApp {
                         ui.label(
                             RichText::new(lang::t(&lang, "Your microphone (an input device, optional)"))
                                 .strong()
-                                .color(theme::TEXT),
+                                .color(theme::c_text()),
                         );
                         let mic_hint = if std::env::consts::OS == "linux" {
                             lang::t(
@@ -2423,7 +2806,7 @@ impl VibeDropApp {
                             )
                             .to_string()
                         };
-                        ui.label(RichText::new(mic_hint).size(12.5).color(theme::TEXT_FAINT));
+                        ui.label(RichText::new(mic_hint).size(12.5).color(theme::c_text_faint()));
                         let route_on = self.settings.secondary_enabled;
                         ui.add_enabled_ui(route_on, |ui| {
                             ui.checkbox(
@@ -2435,7 +2818,7 @@ impl VibeDropApp {
                             ui.label(
                                 RichText::new(lang::t(&lang, "Turn on the microphone route above first."))
                                     .size(12.5)
-                                    .color(theme::TEXT_FAINT),
+                                    .color(theme::c_text_faint()),
                             );
                         }
                         ui.add_enabled_ui(route_on && self.settings.voice_enabled, |ui| {
@@ -2478,14 +2861,14 @@ impl VibeDropApp {
                             )
                         };
                         ui.add(
-                            egui::Label::new(RichText::new(info).size(12.5).color(theme::TEXT_FAINT))
+                            egui::Label::new(RichText::new(info).size(12.5).color(theme::c_text_faint()))
                                 .wrap_mode(egui::TextWrapMode::Truncate),
                         );
                     });
                     ui.label(
                         RichText::new(lang::t(&lang, "The list updates by itself when you plug in or remove a device."))
                             .size(12.0)
-                            .color(theme::TEXT_FAINT),
+                            .color(theme::c_text_faint()),
                     );
 
                     if devices.scanned {
@@ -2494,7 +2877,7 @@ impl VibeDropApp {
                             explain_devices(&lang, DeviceKind::Input, devices.inputs.len(), devices.input_error.as_deref()),
                         ];
                         for text in problems.into_iter().flatten() {
-                            ui.label(RichText::new(text).size(12.5).color(theme::WARNING));
+                            ui.label(RichText::new(text).size(12.5).color(theme::c_warning()));
                         }
                     }
                     let devices_header = if std::env::consts::OS == "windows" {
@@ -2502,7 +2885,7 @@ impl VibeDropApp {
                     } else {
                         lang::t(&lang, "All devices the system reports").to_string()
                     };
-                    egui::CollapsingHeader::new(RichText::new(devices_header).color(theme::TEXT))
+                    egui::CollapsingHeader::new(RichText::new(devices_header).color(theme::c_text()))
                         .id_source("device_lists")
                         .show(ui, |ui| {
                             device_list_section(
@@ -2522,18 +2905,18 @@ impl VibeDropApp {
                             );
                         });
 
-                    egui::CollapsingHeader::new(RichText::new(lang::t(&lang, "How to set up the microphone route")).color(theme::TEXT))
+                    egui::CollapsingHeader::new(RichText::new(lang::t(&lang, "How to set up the microphone route")).color(theme::c_text()))
                         .id_source("mic_setup_help")
                         .show(ui, |ui| {
                             for line in mic_setup_steps(&lang) {
-                                ui.label(RichText::new(line).size(12.5).color(theme::TEXT_DIM));
+                                ui.label(RichText::new(line).size(12.5).color(theme::c_text_dim()));
                             }
                             ui.hyperlink_to(lang::t(&lang, "VB-CABLE (free virtual audio cable)"), "https://vb-audio.com/Cable/");
                         });
                 });
 
                 // Virtual output: free driver helper (no driver is bundled in VibeDrop).
-                theme::card().show(ui, |ui| {
+                theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "VIRTUAL OUTPUT (FREE)"));
                     ui.label(
@@ -2541,7 +2924,7 @@ impl VibeDropApp {
                             &lang,
                             "Windows needs a virtual cable for voice chats; VB-CABLE is freeware from the official site. On Linux, VibeDrop creates a built-in virtual sink with no driver at all.",
                         ))
-                        .color(theme::TEXT_DIM),
+                        .color(theme::c_text_dim()),
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -2560,19 +2943,173 @@ impl VibeDropApp {
                         ui.label(
                             RichText::new("Create a VibeDrop virtual sink (PipeWire/PulseAudio, no installation). In your voice chat, pick VibeDrop (monitor) as the microphone.")
                                 .size(12.5)
-                                .color(theme::TEXT_FAINT),
+                                .color(theme::c_text_faint()),
                         );
                     } else {
                         ui.label(
                             RichText::new("Downloads the official VB-CABLE installer once; run it as administrator a single time. No driver ships inside VibeDrop itself.")
                                 .size(12.5)
-                                .color(theme::TEXT_FAINT),
+                                .color(theme::c_text_faint()),
                         );
                     }
                 });
 
+                // Appearance: theme, accent, radius, font size and panel visibility.
+                theme::frame_card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    theme::section_title(ui, lang::t(&lang, "APPEARANCE"));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(lang::t(&lang, "Theme")).strong());
+                        for (id, name) in [
+                            ("dark", "Classic dark"),
+                            ("midnight", "Midnight"),
+                            ("light", "Light"),
+                        ] {
+                            ui.selectable_value(
+                                &mut self.settings.theme.variant,
+                                id.to_string(),
+                                lang::t(&lang, name),
+                            );
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(lang::t(&lang, "Accent colour")).strong());
+                        let mut accent = self.settings.theme.accent.clone();
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut accent)
+                                .desired_width(110.0)
+                                .hint_text("#2E9BE6"),
+                        );
+                        if resp.changed() {
+                            self.settings.theme.accent = accent.trim().to_string();
+                            self.settings_dirty = true;
+                        }
+                        for (name, color) in [
+                            ("Blue", Color32::from_rgb(0x2E, 0x9B, 0xE6)),
+                            ("Teal", Color32::from_rgb(0x2E, 0xC4, 0xB6)),
+                            ("Amber", Color32::from_rgb(0xE6, 0x9B, 0x2E)),
+                            ("Green", Color32::from_rgb(0x63, 0xC4, 0x54)),
+                            ("Pink", Color32::from_rgb(0xE6, 0x5B, 0x9B)),
+                        ] {
+                            if ui
+                                .selectable_label(
+                                    self.settings.theme.accent.is_empty()
+                                        && theme::c_accent() == color,
+                                    name,
+                                )
+                                .clicked()
+                            {
+                                self.settings.theme.accent = format!(
+                                    "#{:02X}{:02X}{:02X}",
+                                    color.r(),
+                                    color.g(),
+                                    color.b()
+                                );
+                                self.settings_dirty = true;
+                            }
+                        }
+                    });
+                    ui.add_space(6.0);
+                    let mut radius = self.settings.theme.corner_radius;
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut radius, 0.0..=20.0)
+                                .text("Corner radius"),
+                        )
+                        .changed()
+                    {
+                        self.settings.theme.corner_radius = radius;
+                        self.settings_dirty = true;
+                    }
+                    let mut font = self.settings.theme.font_scale;
+                    if ui
+                        .add(egui::Slider::new(&mut font, 12.0..=20.0).text("Font size"))
+                        .changed()
+                    {
+                        self.settings.theme.font_scale = font;
+                        self.settings_dirty = true;
+                    }
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        let mut toggle = |ui: &mut egui::Ui, label: &str, value: &mut bool| {
+                            if ui.checkbox(value, label).changed() {
+                                self.settings_dirty = true;
+                            }
+                        };
+                        toggle(
+                            ui,
+                            lang::t(&lang, "Show sidebar labels"),
+                            &mut self.settings.theme.show_sidebar_labels,
+                        );
+                        toggle(
+                            ui,
+                            lang::t(&lang, "Show transport bar"),
+                            &mut self.settings.theme.show_transport,
+                        );
+                        toggle(
+                            ui,
+                            lang::t(&lang, "Show status bar"),
+                            &mut self.settings.theme.show_status_bar,
+                        );
+                        toggle(
+                            ui,
+                            lang::t(&lang, "Flash window on play"),
+                            &mut self.settings.theme.flash_on_play,
+                        );
+                        toggle(
+                            ui,
+                            lang::t(&lang, "Show level meter"),
+                            &mut self.settings.theme.show_level_meter,
+                        );
+                    });
+                });
+
+                // Playback behaviour.
+                theme::frame_card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    theme::section_title(ui, lang::t(&lang, "PLAYBACK BEHAVIOUR"));
+                    let mut toggle = |ui: &mut egui::Ui, label: &str, value: &mut bool| {
+                        if ui.checkbox(value, label).changed() {
+                            self.settings_dirty = true;
+                        }
+                    };
+                    toggle(
+                        ui,
+                        lang::t(&lang, "Confirm before removing a sound"),
+                        &mut self.settings.playback.confirm_remove,
+                    );
+                    toggle(
+                        ui,
+                        lang::t(&lang, "Show durations in the table"),
+                        &mut self.settings.playback.show_durations,
+                    );
+                    toggle(
+                        ui,
+                        lang::t(&lang, "Stop sounds when the window loses focus"),
+                        &mut self.settings.playback.stop_on_focus_loss,
+                    );
+                    ui.add_space(6.0);
+                    let mut offset = self.settings.playback.start_offset_secs;
+                    if ui
+                        .add(egui::Slider::new(&mut offset, 0.0..=30.0).text("Start offset (s)"))
+                        .changed()
+                    {
+                        self.settings.playback.start_offset_secs = offset;
+                        self.settings_dirty = true;
+                    }
+                    let mut voices = self.settings.playback.max_voices;
+                    if ui
+                        .add(egui::Slider::new(&mut voices, 1..=32).text("Simultaneous sounds"))
+                        .changed()
+                    {
+                        self.settings.playback.max_voices = voices;
+                        self.settings_dirty = true;
+                    }
+                });
+
                 // Volume and playback.
-                theme::card().show(ui, |ui| {
+                theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "VOLUME AND PLAYBACK"));
                     let pct = |v: f64, _: std::ops::RangeInclusive<usize>| format!("{:.0}%", v * 100.0);
@@ -2621,12 +3158,12 @@ impl VibeDropApp {
                             "Each sound's own volume is in its \u{2022}\u{2022}\u{2022} menu. Final level = master x route x default x sound. Loud overlaps are limited instead of distorting.",
                         ))
                         .size(12.0)
-                        .color(theme::TEXT_FAINT),
+                        .color(theme::c_text_faint()),
                     );
                 });
 
                 // Application behavior.
-                theme::card().show(ui, |ui| {
+                theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "APPLICATION"));
                     egui::Grid::new("app_grid").num_columns(2).spacing([24.0, 12.0]).show(ui, |ui| {
@@ -2668,7 +3205,7 @@ impl VibeDropApp {
                 });
 
                 // soundpad:// and vibedrop:// links.
-                theme::card().show(ui, |ui| {
+                theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "SOUNDPAD LINKS"));
                     ui.label(
@@ -2676,18 +3213,18 @@ impl VibeDropApp {
                             &lang,
                             "Register VibeDrop as the handler of soundpad:// and vibedrop:// links, so that clicking a \"play in Soundpad\" link on a website downloads the sound and plays it here. Only https links are downloaded.",
                         ))
-                        .color(theme::TEXT_DIM),
+                        .color(theme::c_text_dim()),
                     );
                     let (status, color) = match &self.protocol_state {
-                        ProtocolState::Registered => (lang::t(&lang, "Registered for this VibeDrop").to_string(), theme::ACCENT),
-                        ProtocolState::NotRegistered => (lang::t(&lang, "Not registered").to_string(), theme::TEXT_DIM),
+                        ProtocolState::Registered => (lang::t(&lang, "Registered for this VibeDrop").to_string(), theme::c_accent()),
+                        ProtocolState::NotRegistered => (lang::t(&lang, "Not registered").to_string(), theme::c_text_dim()),
                         ProtocolState::RegisteredElsewhere(cmd) => {
                             let text = if ru {
                                 format!("Зарегистрировано для другой программы: {cmd}")
                             } else {
                                 format!("Registered for another program: {cmd}")
                             };
-                            (text, theme::WARNING)
+                            (text, theme::c_warning())
                         }
                         ProtocolState::Partial(missing) => {
                             let text = if ru {
@@ -2695,7 +3232,7 @@ impl VibeDropApp {
                             } else {
                                 format!("Partly registered. Missing: {missing}")
                             };
-                            (text, theme::WARNING)
+                            (text, theme::c_warning())
                         }
                     };
                     ui.label(RichText::new(status).color(color));
@@ -2717,12 +3254,12 @@ impl VibeDropApp {
                 });
 
                 // Hotkeys and data.
-                theme::card().show(ui, |ui| {
+                theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "GLOBAL HOTKEYS"));
                     match (&self.hotkey_error, &self.hotkeys) {
                         (Some(e), _) => {
-                            ui.label(RichText::new(lang::tx(&lang, e)).color(theme::DANGER));
+                            ui.label(RichText::new(lang::tx(&lang, e)).color(theme::c_danger()));
                         }
                         (None, Some(hk)) => {
                             let text = if ru {
@@ -2736,19 +3273,19 @@ impl VibeDropApp {
                                     hk.active_count()
                                 )
                             };
-                            ui.label(RichText::new(text).color(theme::TEXT_DIM));
+                            ui.label(RichText::new(text).color(theme::c_text_dim()));
                         }
                         (None, None) => {
-                            ui.label(RichText::new(lang::t(&lang, "Hotkeys are not active.")).color(theme::TEXT_DIM));
+                            ui.label(RichText::new(lang::t(&lang, "Hotkeys are not active.")).color(theme::c_text_dim()));
                         }
                     }
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label(lang::t(&lang, "Mute / unmute the microphone route"));
                         let (text, color, filled) = match (&self.settings.mic_mute_hotkey, self.mic_hotkey_inactive) {
-                            (Some(h), false) => (h.clone(), theme::ACCENT, true),
-                            (Some(h), true) => (format!("{h} {}", lang::t(&lang, "(inactive)")), theme::WARNING, false),
-                            (None, _) => (lang::t(&lang, "+ Hotkey").to_string(), theme::TEXT_DIM, false),
+                            (Some(h), false) => (h.clone(), theme::c_accent(), true),
+                            (Some(h), true) => (format!("{h} {}", lang::t(&lang, "(inactive)")), theme::c_warning(), false),
+                            (None, _) => (lang::t(&lang, "+ Hotkey").to_string(), theme::c_text_dim(), false),
                         };
                         if theme::chip(ui, &text, color, filled)
                             .on_hover_text(lang::t(&lang, "Click to set a global hotkey"))
@@ -2764,7 +3301,26 @@ impl VibeDropApp {
                     });
                     ui.add_space(4.0);
                     theme::section_title(ui, lang::t(&lang, "DATA FOLDER"));
-                    ui.label(RichText::new(self.paths.root().display().to_string()).size(12.5).color(theme::TEXT_DIM));
+                    ui.label(RichText::new(self.paths.root().display().to_string()).size(12.5).color(theme::c_text_dim()));
+                    ui.label(
+                        RichText::new(lang::t(
+                            &lang,
+                            "Your library, settings and the recently played list are stored here and survive restarts and updates.",
+                        ))
+                        .size(12.5)
+                        .color(theme::c_text_faint()),
+                    );
+                    ui.horizontal(|ui| {
+                        if theme::secondary_button(ui, lang::t(&lang, "Export backup")).clicked() {
+                            export_backup = true;
+                        }
+                        if theme::secondary_button(ui, lang::t(&lang, "Import backup")).clicked() {
+                            import_backup = true;
+                        }
+                        if theme::secondary_button(ui, lang::t(&lang, "Open data folder")).clicked() {
+                            open_data_folder = true;
+                        }
+                    });
                 });
                 ui.add_space(8.0);
             });
@@ -2773,6 +3329,37 @@ impl VibeDropApp {
         if refresh_devices {
             self.engine.rescan_devices();
             self.engine.configure(self.device_config());
+        }
+        if export_backup {
+            match self.export_backup() {
+                Ok(path) => {
+                    let text = if ru {
+                        format!("Резервная копия сохранена: {path}")
+                    } else {
+                        format!("Backup saved: {path}")
+                    };
+                    self.toast(ToastKind::Success, text);
+                }
+                Err(e) => self.toast(ToastKind::Error, e),
+            }
+        }
+        if import_backup {
+            let picked = rfd::FileDialog::new()
+                .set_title(lang::t(&lang, "Import backup"))
+                .add_filter("VibeDrop backup", &["json"])
+                .pick_file();
+            if let Some(path) = picked {
+                match self.import_backup(&path) {
+                    Ok(()) => {
+                        let text = lang::t(&lang, "Backup restored. Restart VibeDrop to apply it.");
+                        self.toast(ToastKind::Success, text);
+                    }
+                    Err(e) => self.toast(ToastKind::Error, e),
+                }
+            }
+        }
+        if open_data_folder {
+            self.open_data_folder();
         }
         if let Some(role) = test {
             self.engine.test_tone(role);
@@ -2956,7 +3543,7 @@ impl VibeDropApp {
                         &lang,
                         "Click Record and press the combination you want. It works system-wide.",
                     ))
-                    .color(theme::TEXT_DIM),
+                    .color(theme::c_text_dim()),
                 );
                 ui.horizontal(|ui| {
                     let hint = if d.recording {
@@ -2981,7 +3568,7 @@ impl VibeDropApp {
                     }
                 });
                 if let Some(e) = &d.error {
-                    ui.label(RichText::new(lang::tx(&lang, e)).color(theme::DANGER));
+                    ui.label(RichText::new(lang::tx(&lang, e)).color(theme::c_danger()));
                 }
                 ui.horizontal(|ui| {
                     if theme::primary_button(ui, lang::t(&lang, "Save")).clicked() {
@@ -3044,7 +3631,7 @@ impl VibeDropApp {
                         &lang,
                         "Paste a direct https:// link to a WAV or MP3 file, or a soundpad:// link.",
                     ))
-                    .color(theme::TEXT_DIM),
+                    .color(theme::c_text_dim()),
                 );
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut d.text)
@@ -3057,7 +3644,7 @@ impl VibeDropApp {
                 }
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                 if let Some(e) = &d.error {
-                    ui.label(RichText::new(lang::tx(&lang, e)).color(theme::DANGER));
+                    ui.label(RichText::new(lang::tx(&lang, e)).color(theme::c_danger()));
                 }
                 ui.horizontal(|ui| {
                     if theme::primary_button(ui, lang::t(&lang, "Download")).clicked() || enter {
@@ -3101,12 +3688,12 @@ impl VibeDropApp {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        ui.label(RichText::new("Vibe").size(22.0).strong().color(theme::TEXT));
-                        ui.label(RichText::new("Drop").size(22.0).strong().color(theme::ACCENT));
+                        ui.label(RichText::new("Vibe").size(22.0).strong().color(theme::c_text()));
+                        ui.label(RichText::new("Drop").size(22.0).strong().color(theme::c_accent()));
                     });
                     ui.label(
                         RichText::new("Free open-source soundboard for voice chats (desktop, Rust).")
-                            .color(theme::TEXT_DIM),
+                            .color(theme::c_text_dim()),
                     );
                     ui.separator();
                     if lang::ru(&lang) {
@@ -3115,7 +3702,7 @@ impl VibeDropApp {
                                 "VibeDrop — независимый проект с открытым исходным кодом (лицензия Apache-2.0), вдохновлённый саундбордами в духе Soundpad. Soundpad — товарный знак соответствующего правообладателя; данный проект не аффилирован с ним.\n\nVB-CABLE — бесплатный виртуальный аудиокабель от VB-Audio; он не входит в комплект поставки VibeDrop и не связан с его разработчиками.",
                             )
                             .size(12.5)
-                            .color(theme::TEXT_DIM),
+                            .color(theme::c_text_dim()),
                         );
                     } else {
                         ui.label(
@@ -3123,7 +3710,7 @@ impl VibeDropApp {
                                 "VibeDrop is an independent open-source project (Apache-2.0), inspired by soundboards in the spirit of Soundpad. Soundpad is a trademark of its respective owner; this project is not affiliated with it.\n\nVB-CABLE is a free virtual audio cable by VB-Audio; it is not bundled with VibeDrop and is not affiliated with its developers.",
                             )
                             .size(12.5)
-                            .color(theme::TEXT_DIM),
+                            .color(theme::c_text_dim()),
                         );
                     }
                     ui.hyperlink_to(
@@ -3151,18 +3738,18 @@ impl VibeDropApp {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 for toast in &self.toasts {
                     let accent = match toast.kind {
-                        ToastKind::Info => theme::ACCENT_DIM,
-                        ToastKind::Success => theme::ACCENT,
-                        ToastKind::Error => theme::DANGER,
+                        ToastKind::Info => theme::c_accent_dim(),
+                        ToastKind::Success => theme::c_accent(),
+                        ToastKind::Error => theme::c_danger(),
                     };
                     egui::Frame::none()
-                        .fill(theme::CARD)
+                        .fill(theme::c_card())
                         .stroke(Stroke::new(1.0_f32, accent))
                         .rounding(10.0)
                         .inner_margin(egui::Margin::symmetric(14.0, 10.0))
                         .show(ui, |ui| {
                             ui.set_max_width(380.0);
-                            ui.label(RichText::new(&toast.text).color(theme::TEXT));
+                            ui.label(RichText::new(&toast.text).color(theme::c_text()));
                         });
                 }
             });
@@ -3288,7 +3875,7 @@ fn route_status(ui: &mut Ui, lang: &str, state: &RouteState) {
             fallback_from: None,
             ..
         } => (
-            theme::ACCENT,
+            theme::c_accent(),
             if lang::ru(lang) {
                 format!("Играет через «{device}» ({} кГц)", *rate as f32 / 1000.0)
             } else {
@@ -3298,12 +3885,12 @@ fn route_status(ui: &mut Ui, lang: &str, state: &RouteState) {
         RouteState::Active {
             fallback_from: Some(_), ..
         }
-        | RouteState::NotSelected => (theme::WARNING, describe_state(lang, state)),
+        | RouteState::NotSelected => (theme::c_warning(), describe_state(lang, state)),
         RouteState::Lost { .. }
         | RouteState::Conflict { .. }
         | RouteState::Failed { .. }
-        | RouteState::Missing { .. } => (theme::DANGER, describe_state(lang, state)),
-        RouteState::Disabled | RouteState::Standby { .. } => (theme::TEXT_FAINT, describe_state(lang, state)),
+        | RouteState::Missing { .. } => (theme::c_danger(), describe_state(lang, state)),
+        RouteState::Disabled | RouteState::Standby { .. } => (theme::c_text_faint(), describe_state(lang, state)),
     };
     ui.label(RichText::new(format!("\u{25CF} {text}")).size(12.5).color(color));
 }
@@ -3325,7 +3912,7 @@ fn voice_status(ui: &mut Ui, lang: &str, state: &RouteState) {
                     *rate as f32 / 1000.0
                 )
             };
-            ui.label(RichText::new(text).size(12.5).color(theme::ACCENT));
+            ui.label(RichText::new(text).size(12.5).color(theme::c_accent()));
         }
         other => route_status(ui, lang, other),
     }
@@ -3422,7 +4009,7 @@ fn mic_device_combo(ui: &mut Ui, lang: &str, id: &str, value: &mut Option<String
 
 /// Download the official freeware VB-CABLE installer zip (vb-audio.com) to `dest`.
 /// The driver itself is never bundled inside VibeDrop.
-fn download_vbcable(dest: &PathBuf) -> Result<(), String> {
+fn download_vbcable(dest: &std::path::Path) -> Result<(), String> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("VibeDrop/0.3 (desktop soundboard; free cable helper)")
         .timeout(std::time::Duration::from_secs(60))
@@ -3438,6 +4025,13 @@ fn download_vbcable(dest: &PathBuf) -> Result<(), String> {
     let bytes = resp.bytes().map_err(|e| e.to_string())?;
     std::fs::write(dest, bytes).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Download the official freeware VB-CABLE package, reporting progress to the UI.
+fn download_vbcable_with_progress(dest: &std::path::Path, tx: &Sender<HelperMsg>) -> Result<(), String> {
+    crate::cable::download(dest, |received, total| {
+        let _ = tx.try_send(HelperMsg::CableProgress(received, total));
+    })
 }
 
 /// Write interleaved stereo f32 samples as a 16-bit PCM WAV file.
@@ -3472,8 +4066,8 @@ fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&m
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
-            ui.label(RichText::new(title).size(34.0).strong().color(theme::TEXT));
-            ui.label(RichText::new(subtitle).size(13.0).color(theme::TEXT_DIM));
+            ui.label(RichText::new(title).size(34.0).strong().color(theme::c_text()));
+            ui.label(RichText::new(subtitle).size(13.0).color(theme::c_text_dim()));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), actions);
     });
@@ -3483,7 +4077,7 @@ fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&m
 fn volume_row_inline(ui: &mut Ui, label: &str, value: &mut f32, enabled: bool) -> bool {
     ui.add_sized(
         vec2(52.0, 18.0),
-        egui::Label::new(RichText::new(label).size(12.5).color(theme::TEXT_DIM)),
+        egui::Label::new(RichText::new(label).size(12.5).color(theme::c_text_dim())),
     );
     ui.spacing_mut().slider_width = ui.spacing().slider_width.min(130.0);
     let changed = ui
@@ -3493,7 +4087,7 @@ fn volume_row_inline(ui: &mut Ui, label: &str, value: &mut f32, enabled: bool) -
         RichText::new(format!("{:>3}%", (*value * 100.0).round() as i32))
             .monospace()
             .size(12.0)
-            .color(theme::TEXT_DIM),
+            .color(theme::c_text_dim()),
     );
     changed
 }
@@ -3569,10 +4163,14 @@ fn device_list_section(ui: &mut Ui, lang: &str, title: &'static str, names: &[St
     ui.label(
         RichText::new(format!("{}: {}", lang::t(lang, title), names.len()))
             .strong()
-            .color(theme::TEXT_DIM),
+            .color(theme::c_text_dim()),
     );
     if names.is_empty() {
-        ui.label(RichText::new(lang::t(lang, "none")).size(12.5).color(theme::TEXT_FAINT));
+        ui.label(
+            RichText::new(lang::t(lang, "none"))
+                .size(12.5)
+                .color(theme::c_text_faint()),
+        );
     }
     for name in names {
         let mut tags: Vec<&str> = Vec::new();
@@ -3587,7 +4185,7 @@ fn device_list_section(ui: &mut Ui, lang: &str, title: &'static str, names: &[St
         } else {
             format!("{name}  ({})", tags.join(", "))
         };
-        ui.label(RichText::new(text).size(12.5).color(theme::TEXT_DIM));
+        ui.label(RichText::new(text).size(12.5).color(theme::c_text_dim()));
     }
 }
 
@@ -3645,6 +4243,16 @@ impl eframe::App for VibeDropApp {
         self.pump_events(ctx);
         self.handle_close(ctx);
         self.sync_presence();
+        // Live appearance changes: re-apply the palette, radius and font size.
+        if self.applied_theme != self.settings.theme {
+            self.applied_theme = self.settings.theme.clone();
+            theme::apply_settings(ctx, &self.settings.theme);
+        }
+
+        if self.setup.is_some() {
+            self.draw_setup(ctx);
+            return;
+        }
 
         self.draw_menubar(ctx);
         self.draw_transport(ctx);

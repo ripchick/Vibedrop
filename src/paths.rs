@@ -9,6 +9,8 @@ pub struct AppPaths {
     pub root: PathBuf,
     pub settings_file: PathBuf,
     pub library_file: PathBuf,
+    /// Recently played sounds (kept between sessions).
+    pub history_file: PathBuf,
     /// VibeDrop-managed copies of imported and downloaded sounds.
     pub sounds_dir: PathBuf,
     pub logs_dir: PathBuf,
@@ -20,6 +22,7 @@ impl AppPaths {
         Self {
             settings_file: root.join("settings.json"),
             library_file: root.join("library.json"),
+            history_file: root.join("history.json"),
             sounds_dir: root.join("sounds"),
             logs_dir: root.join("logs"),
             root,

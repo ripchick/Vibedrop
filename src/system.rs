@@ -238,6 +238,68 @@ pub fn unregister_protocol() -> Result<(), String> {
     platform::unregister()
 }
 
+/// Start VibeDrop when the user logs in (Windows only, current user).
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let run = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                winreg::enums::KEY_READ | winreg::enums::KEY_WRITE,
+            )
+            .map_err(|e| e.to_string())?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        if enabled {
+            run.set_value("VibeDrop", &format!("\"{}\"", exe.display()))
+                .map_err(|e| e.to_string())?;
+        } else {
+            let _ = run.delete_value("VibeDrop");
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = enabled;
+        Ok(())
+    }
+}
+
+/// Create a desktop shortcut to the current executable (Windows only).
+pub fn create_desktop_shortcut() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let script = format!(
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}\\VibeDrop.lnk');\
+             $s.TargetPath='{}';$s.WorkingDirectory='{}';$s.Save()",
+            desktop_dir().replace('\'', "''"),
+            exe.display().to_string().replace('\'', "''"),
+            exe.parent()
+                .unwrap_or(std::path::Path::new("."))
+                .display()
+                .to_string()
+                .replace('\'', "''"),
+        );
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
+fn desktop_dir() -> String {
+    std::env::var("USERPROFILE")
+        .map(|p| format!("{p}\\Desktop"))
+        .unwrap_or_else(|_| ".".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

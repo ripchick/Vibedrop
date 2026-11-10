@@ -11,51 +11,233 @@ use eframe::egui::{
 
 // ---- Palette ---------------------------------------------------------------------------------
 
-/// Window / page background `#3C3C3C` (soundboard grey).
-pub const BG: Color32 = Color32::from_rgb(0x3C, 0x3C, 0x3C);
-/// Cards and panels `#4A4A4A`.
-pub const CARD: Color32 = Color32::from_rgb(0x4A, 0x4A, 0x4A);
-/// Card under the pointer.
-pub const CARD_HOVER: Color32 = Color32::from_rgb(0x56, 0x56, 0x56);
-/// Rail / deck background, a touch darker than the cards.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x45, 0x45, 0x45);
-/// Input fields and slider rails.
-pub const INPUT_BG: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
-/// Primary accent `#2E9BE6` (soundboard blue).
-pub const ACCENT: Color32 = Color32::from_rgb(0x2E, 0x9B, 0xE6);
-/// Accent on hover (slightly lighter).
-pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x4A, 0xB4, 0xF5);
-/// Muted accent for secondary strokes.
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x1E, 0x6B, 0xA6);
-/// Dark blue tint used behind selected / hovered accent elements.
-pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x1F, 0x3F, 0x5C);
-/// Secondary accent for highlights and the brand mark.
-pub const ACCENT_ALT: Color32 = Color32::from_rgb(0x7C, 0xF0, 0xD4);
-/// Borders `#2E2E2E`.
-pub const BORDER: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2E);
-/// Main text `#F2F2F2`.
-pub const TEXT: Color32 = Color32::from_rgb(0xF2, 0xF2, 0xF2);
-/// Secondary text.
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0xC0, 0xC0, 0xC0);
-/// Disabled text and icons.
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8A, 0x8A, 0x8A);
-/// Errors and destructive actions.
-pub const DANGER: Color32 = Color32::from_rgb(0xFF, 0x6B, 0x6B);
-/// Warnings.
-pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xC8, 0x57);
+/// The colour set the whole UI is drawn with. It can be changed at runtime
+/// (Settings -> Appearance) without restarting the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Palette {
+    pub bg: Color32,
+    pub card: Color32,
+    pub card_hover: Color32,
+    pub sidebar: Color32,
+    pub input_bg: Color32,
+    pub accent: Color32,
+    pub accent_hover: Color32,
+    pub accent_dim: Color32,
+    pub accent_fill: Color32,
+    pub accent_alt: Color32,
+    pub border: Color32,
+    pub text: Color32,
+    pub text_dim: Color32,
+    pub text_faint: Color32,
+    pub danger: Color32,
+    pub warning: Color32,
+}
 
+/// The classic soundboard look (dark grey surfaces, blue accents).
+const DARK: Palette = Palette {
+    bg: Color32::from_rgb(0x3C, 0x3C, 0x3C),
+    card: Color32::from_rgb(0x4A, 0x4A, 0x4A),
+    card_hover: Color32::from_rgb(0x56, 0x56, 0x56),
+    sidebar: Color32::from_rgb(0x45, 0x45, 0x45),
+    input_bg: Color32::from_rgb(0x33, 0x33, 0x33),
+    accent: Color32::from_rgb(0x2E, 0x9B, 0xE6),
+    accent_hover: Color32::from_rgb(0x4A, 0xB4, 0xF5),
+    accent_dim: Color32::from_rgb(0x1E, 0x6B, 0xA6),
+    accent_fill: Color32::from_rgb(0x1F, 0x3F, 0x5C),
+    accent_alt: Color32::from_rgb(0x7C, 0xF0, 0xD4),
+    border: Color32::from_rgb(0x2E, 0x2E, 0x2E),
+    text: Color32::from_rgb(0xF2, 0xF2, 0xF2),
+    text_dim: Color32::from_rgb(0xC0, 0xC0, 0xC0),
+    text_faint: Color32::from_rgb(0x8A, 0x8A, 0x8A),
+    danger: Color32::from_rgb(0xFF, 0x6B, 0x6B),
+    warning: Color32::from_rgb(0xFF, 0xD1, 0x66),
+};
+
+/// Deep blue-black surfaces with the same blue accent.
+const MIDNIGHT: Palette = Palette {
+    bg: Color32::from_rgb(0x14, 0x17, 0x20),
+    card: Color32::from_rgb(0x1D, 0x21, 0x2C),
+    card_hover: Color32::from_rgb(0x26, 0x2B, 0x38),
+    sidebar: Color32::from_rgb(0x18, 0x1C, 0x26),
+    input_bg: Color32::from_rgb(0x11, 0x14, 0x1C),
+    accent: Color32::from_rgb(0x4C, 0xC2, 0xFF),
+    accent_hover: Color32::from_rgb(0x6B, 0xDB, 0xFF),
+    accent_dim: Color32::from_rgb(0x2A, 0x6B, 0xA8),
+    accent_fill: Color32::from_rgb(0x1B, 0x3A, 0x52),
+    accent_alt: Color32::from_rgb(0x7C, 0xF0, 0xD4),
+    border: Color32::from_rgb(0x2A, 0x30, 0x3D),
+    text: Color32::from_rgb(0xF2, 0xF5, 0xFA),
+    text_dim: Color32::from_rgb(0xB4, 0xBE, 0xCE),
+    text_faint: Color32::from_rgb(0x76, 0x82, 0x95),
+    danger: Color32::from_rgb(0xFF, 0x6B, 0x6B),
+    warning: Color32::from_rgb(0xFF, 0xD1, 0x66),
+};
+
+/// Light surfaces for bright rooms.
+const LIGHT: Palette = Palette {
+    bg: Color32::from_rgb(0xF2, 0xF2, 0xF2),
+    card: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+    card_hover: Color32::from_rgb(0xE9, 0xEE, 0xF5),
+    sidebar: Color32::from_rgb(0xEC, 0xEC, 0xEC),
+    input_bg: Color32::from_rgb(0xF7, 0xF7, 0xF7),
+    accent: Color32::from_rgb(0x0F, 0x76, 0xBD),
+    accent_hover: Color32::from_rgb(0x1B, 0x8A, 0xD8),
+    accent_dim: Color32::from_rgb(0x9A, 0xC9, 0xE8),
+    accent_fill: Color32::from_rgb(0xDC, 0xEC, 0xFA),
+    accent_alt: Color32::from_rgb(0x10, 0x8A, 0x74),
+    border: Color32::from_rgb(0xD6, 0xD6, 0xD6),
+    text: Color32::from_rgb(0x1A, 0x1A, 0x1A),
+    text_dim: Color32::from_rgb(0x4A, 0x4A, 0x4A),
+    text_faint: Color32::from_rgb(0x8A, 0x8A, 0x8A),
+    danger: Color32::from_rgb(0xC4, 0x28, 0x28),
+    warning: Color32::from_rgb(0xB2, 0x7A, 0x00),
+};
+
+static PALETTE: std::sync::RwLock<Palette> = std::sync::RwLock::new(DARK);
+
+/// The palette currently in use.
+pub fn palette() -> Palette {
+    *PALETTE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Replace the palette (called when the user changes the appearance settings).
+pub fn set_palette(p: Palette) {
+    *PALETTE.write().unwrap_or_else(|e| e.into_inner()) = p;
+}
+
+/// Corner radius currently in use.
+static CORNER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(8);
+
+pub fn corner() -> f32 {
+    CORNER.load(std::sync::atomic::Ordering::Relaxed) as f32
+}
+
+pub fn set_corner(radius: f32) {
+    CORNER.store(radius.clamp(0.0, 24.0) as u32, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn c_bg() -> Color32 {
+    palette().bg
+}
+pub fn c_card() -> Color32 {
+    palette().card
+}
+pub fn c_card_hover() -> Color32 {
+    palette().card_hover
+}
+pub fn c_sidebar() -> Color32 {
+    palette().sidebar
+}
+pub fn c_input_bg() -> Color32 {
+    palette().input_bg
+}
+pub fn c_accent() -> Color32 {
+    palette().accent
+}
+pub fn c_accent_hover() -> Color32 {
+    palette().accent_hover
+}
+pub fn c_accent_dim() -> Color32 {
+    palette().accent_dim
+}
+pub fn c_accent_fill() -> Color32 {
+    palette().accent_fill
+}
+pub fn c_accent_alt() -> Color32 {
+    palette().accent_alt
+}
+pub fn c_border() -> Color32 {
+    palette().border
+}
+pub fn c_text() -> Color32 {
+    palette().text
+}
+pub fn c_text_dim() -> Color32 {
+    palette().text_dim
+}
+pub fn c_text_faint() -> Color32 {
+    palette().text_faint
+}
+pub fn c_danger() -> Color32 {
+    palette().danger
+}
+pub fn c_warning() -> Color32 {
+    palette().warning
+}
+
+/// Parse a `#RRGGBB` colour string.
+pub fn parse_color(text: &str) -> Option<Color32> {
+    let t = text.trim();
+    let hex = t.strip_prefix('#')?;
+    let value = u32::from_str_radix(hex, 16).ok()?;
+    match hex.len() {
+        6 => Some(Color32::from_rgb(
+            ((value >> 16) & 0xFF) as u8,
+            ((value >> 8) & 0xFF) as u8,
+            (value & 0xFF) as u8,
+        )),
+        3 => {
+            let r = ((value >> 8) & 0xF) as u8;
+            let g = ((value >> 4) & 0xF) as u8;
+            let b = (value & 0xF) as u8;
+            Some(Color32::from_rgb(r * 17, g * 17, b * 17))
+        }
+        _ => None,
+    }
+}
+
+/// The colour a custom accent is mixed with (darker variant of the accent).
+fn dim_of(accent: Color32) -> Color32 {
+    Color32::from_rgb(
+        (accent.r() as f32 * 0.68) as u8,
+        (accent.g() as f32 * 0.68) as u8,
+        (accent.b() as f32 * 0.68) as u8,
+    )
+}
+
+fn hover_of(accent: Color32) -> Color32 {
+    Color32::from_rgb(
+        (accent.r() as f32 * 1.25).min(255.0) as u8,
+        (accent.g() as f32 * 1.25).min(255.0) as u8,
+        (accent.b() as f32 * 1.25).min(255.0) as u8,
+    )
+}
+
+fn fill_of(accent: Color32) -> Color32 {
+    Color32::from_rgb(
+        (accent.r() as f32 * 0.22) as u8,
+        (accent.g() as f32 * 0.22) as u8,
+        (accent.b() as f32 * 0.22) as u8,
+    )
+}
+
+/// Build the palette from the user's appearance settings.
+pub fn palette_for(settings: &crate::settings::ThemeSettings) -> Palette {
+    let mut p = match settings.variant.as_str() {
+        "midnight" => MIDNIGHT,
+        "light" => LIGHT,
+        _ => DARK,
+    };
+    if let Some(custom) = parse_color(&settings.accent) {
+        p.accent = custom;
+        p.accent_hover = hover_of(custom);
+        p.accent_dim = dim_of(custom);
+        p.accent_fill = fill_of(custom);
+    }
+    p
+}
 // ---- egui style ------------------------------------------------------------------------------
 
 /// Install the VibeDrop look into an egui context. Call once at start-up.
 pub fn apply(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
     v.dark_mode = true;
-    v.panel_fill = BG;
-    v.window_fill = CARD;
-    v.extreme_bg_color = INPUT_BG;
-    v.faint_bg_color = CARD;
-    v.code_bg_color = CARD_HOVER;
-    v.window_stroke = Stroke::new(1.0_f32, BORDER);
+    v.panel_fill = palette().bg;
+    v.window_fill = palette().card;
+    v.extreme_bg_color = palette().input_bg;
+    v.faint_bg_color = palette().card;
+    v.code_bg_color = palette().card_hover;
+    v.window_stroke = Stroke::new(1.0_f32, c_border());
     v.window_rounding = Rounding::same(10.0);
     v.menu_rounding = Rounding::same(8.0);
     v.window_shadow = Shadow {
@@ -70,41 +252,41 @@ pub fn apply(ctx: &egui::Context) {
         spread: 0.0,
         color: Color32::from_black_alpha(175),
     };
-    v.selection.bg_fill = ACCENT_DIM;
-    v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
-    v.hyperlink_color = ACCENT;
+    v.selection.bg_fill = c_accent_dim();
+    v.selection.stroke = Stroke::new(1.0_f32, c_accent());
+    v.hyperlink_color = c_accent();
     v.slider_trailing_fill = true;
 
-    let r = Rounding::same(6.0);
+    let r = Rounding::same(corner());
 
-    v.widgets.noninteractive.bg_fill = CARD;
-    v.widgets.noninteractive.weak_bg_fill = CARD;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, BORDER);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT);
+    v.widgets.noninteractive.bg_fill = c_card();
+    v.widgets.noninteractive.weak_bg_fill = c_card();
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, c_border());
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, c_text());
     v.widgets.noninteractive.rounding = r;
 
-    v.widgets.inactive.bg_fill = INPUT_BG;
-    v.widgets.inactive.weak_bg_fill = CARD_HOVER;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
+    v.widgets.inactive.bg_fill = c_input_bg();
+    v.widgets.inactive.weak_bg_fill = c_card_hover();
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, c_border());
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, c_text());
     v.widgets.inactive.rounding = r;
 
-    v.widgets.hovered.bg_fill = CARD_HOVER;
-    v.widgets.hovered.weak_bg_fill = ACCENT_FILL;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT_DIM);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, ACCENT);
+    v.widgets.hovered.bg_fill = c_card_hover();
+    v.widgets.hovered.weak_bg_fill = c_accent_fill();
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, c_accent_dim());
+    v.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, c_accent());
     v.widgets.hovered.rounding = r;
 
-    v.widgets.active.bg_fill = ACCENT_FILL;
-    v.widgets.active.weak_bg_fill = ACCENT_FILL;
-    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-    v.widgets.active.fg_stroke = Stroke::new(2.0_f32, ACCENT);
+    v.widgets.active.bg_fill = c_accent_fill();
+    v.widgets.active.weak_bg_fill = c_accent_fill();
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, c_accent());
+    v.widgets.active.fg_stroke = Stroke::new(2.0_f32, c_accent());
     v.widgets.active.rounding = r;
 
-    v.widgets.open.bg_fill = CARD_HOVER;
-    v.widgets.open.weak_bg_fill = CARD_HOVER;
-    v.widgets.open.bg_stroke = Stroke::new(1.0_f32, ACCENT_DIM);
-    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, TEXT);
+    v.widgets.open.bg_fill = c_card_hover();
+    v.widgets.open.weak_bg_fill = c_card_hover();
+    v.widgets.open.bg_stroke = Stroke::new(1.0_f32, c_accent_dim());
+    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, c_text());
     v.widgets.open.rounding = r;
 
     ctx.set_visuals(v);
@@ -113,6 +295,7 @@ pub fn apply(ctx: &egui::Context) {
     load_system_font(ctx);
 
     ctx.style_mut(|s| {
+        let font = font_scale();
         s.spacing.item_spacing = vec2(13.0, 12.0);
         s.spacing.button_padding = vec2(17.0, 9.0);
         s.spacing.interact_size.y = 36.0;
@@ -120,14 +303,36 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.slider_width = 180.0;
         s.spacing.combo_width = 230.0;
         s.text_styles = [
-            (TextStyle::Heading, FontId::new(34.0, FontFamily::Proportional)),
-            (TextStyle::Body, FontId::new(15.0, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(14.5, FontFamily::Proportional)),
-            (TextStyle::Small, FontId::new(12.5, FontFamily::Proportional)),
-            (TextStyle::Monospace, FontId::new(14.0, FontFamily::Monospace)),
+            (TextStyle::Heading, FontId::new(font + 19.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(font, FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(font - 0.5, FontFamily::Proportional)),
+            (TextStyle::Small, FontId::new(font - 2.5, FontFamily::Proportional)),
+            (TextStyle::Monospace, FontId::new(font - 1.0, FontFamily::Monospace)),
         ]
         .into();
     });
+}
+
+/// The base font size the user chose.
+static FONT_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(150);
+
+pub fn font_scale() -> f32 {
+    FONT_SCALE.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10.0
+}
+
+pub fn set_font_scale(size: f32) {
+    FONT_SCALE.store(
+        (size.clamp(12.0, 20.0) * 10.0) as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Apply the user's appearance settings: palette, corner radius and font size.
+pub fn apply_settings(ctx: &egui::Context, settings: &crate::settings::ThemeSettings) {
+    set_palette(palette_for(settings));
+    set_corner(settings.corner_radius);
+    set_font_scale(settings.font_scale);
+    apply(ctx);
 }
 
 // ---- Frames ----------------------------------------------------------------------------------
@@ -151,10 +356,10 @@ fn load_system_font(ctx: &egui::Context) {
 }
 
 /// A rounded card with a thin border.
-pub fn card() -> egui::Frame {
+pub fn frame_card() -> egui::Frame {
     egui::Frame::none()
-        .fill(CARD)
-        .stroke(Stroke::new(1.0_f32, BORDER))
+        .fill(c_card())
+        .stroke(Stroke::new(1.0_f32, c_border()))
         .rounding(Rounding::same(8.0))
         .inner_margin(Margin::symmetric(16.0, 12.0))
 }
@@ -162,8 +367,8 @@ pub fn card() -> egui::Frame {
 /// A sound row card: quietly tinted while it is playing.
 pub fn sound_card(playing: bool) -> egui::Frame {
     egui::Frame::none()
-        .fill(if playing { ACCENT_FILL } else { CARD })
-        .stroke(Stroke::new(1.0_f32, if playing { ACCENT_DIM } else { BORDER }))
+        .fill(if playing { c_accent_fill() } else { c_card() })
+        .stroke(Stroke::new(1.0_f32, if playing { c_accent_dim() } else { c_border() }))
         .rounding(Rounding::same(8.0))
         .inner_margin(Margin::symmetric(15.0, 11.0))
 }
@@ -171,8 +376,8 @@ pub fn sound_card(playing: bool) -> egui::Frame {
 /// A sound tile card: loudly tinted while it is playing.
 pub fn tile_card(playing: bool) -> egui::Frame {
     egui::Frame::none()
-        .fill(if playing { ACCENT_FILL } else { CARD })
-        .stroke(Stroke::new(1.0_f32, if playing { ACCENT } else { BORDER }))
+        .fill(if playing { c_accent_fill() } else { c_card() })
+        .stroke(Stroke::new(1.0_f32, if playing { c_accent() } else { c_border() }))
         .rounding(Rounding::same(20.0))
         .inner_margin(Margin::symmetric(15.0, 13.0))
 }
@@ -180,8 +385,8 @@ pub fn tile_card(playing: bool) -> egui::Frame {
 /// A right-hand control-deck card.
 pub fn deck_card() -> egui::Frame {
     egui::Frame::none()
-        .fill(CARD)
-        .stroke(Stroke::new(1.0_f32, BORDER))
+        .fill(c_card())
+        .stroke(Stroke::new(1.0_f32, c_border()))
         .rounding(Rounding::same(20.0))
         .inner_margin(Margin::symmetric(16.0, 13.0))
 }
@@ -189,15 +394,15 @@ pub fn deck_card() -> egui::Frame {
 /// A soft inset field used for search and filters.
 pub fn inset() -> egui::Frame {
     egui::Frame::none()
-        .fill(INPUT_BG)
-        .stroke(Stroke::new(1.0_f32, BORDER))
+        .fill(c_input_bg())
+        .stroke(Stroke::new(1.0_f32, c_border()))
         .rounding(Rounding::same(6.0))
         .inner_margin(Margin::symmetric(13.0, 7.0))
 }
 
 /// Smaller section title used inside the settings page.
 pub fn section_title(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(13.0).strong().color(ACCENT));
+    ui.label(RichText::new(text).size(13.0).strong().color(c_accent()));
 }
 
 // ---- Text buttons ----------------------------------------------------------------------------
@@ -205,8 +410,8 @@ pub fn section_title(ui: &mut Ui, text: &str) {
 /// Filled amber call-to-action button.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(BG).strong())
-            .fill(ACCENT)
+        egui::Button::new(RichText::new(text).color(c_bg()).strong())
+            .fill(c_accent())
             .stroke(Stroke::NONE)
             .rounding(Rounding::same(12.0)),
     )
@@ -216,9 +421,9 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 /// Outlined neutral button.
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(TEXT))
-            .fill(CARD_HOVER)
-            .stroke(Stroke::new(1.0_f32, BORDER))
+        egui::Button::new(RichText::new(text).color(c_text()))
+            .fill(c_card_hover())
+            .stroke(Stroke::new(1.0_f32, c_border()))
             .rounding(Rounding::same(12.0)),
     )
     .on_hover_cursor(CursorIcon::PointingHand)
@@ -227,7 +432,7 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
 /// Red-tinted button for destructive actions.
 pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(DANGER).strong())
+        egui::Button::new(RichText::new(text).color(c_danger()).strong())
             .fill(Color32::from_rgb(0x3B, 0x1B, 0x1B))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x6B, 0x2B, 0x2B)))
             .rounding(Rounding::same(12.0)),
@@ -237,8 +442,8 @@ pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
 
 /// Pill-shaped label that can be clicked (used for hotkeys).
 pub fn chip(ui: &mut Ui, text: &str, color: Color32, filled: bool) -> Response {
-    let fill = if filled { ACCENT_FILL } else { Color32::TRANSPARENT };
-    let border = if filled { color } else { BORDER };
+    let fill = if filled { c_accent_fill() } else { Color32::TRANSPARENT };
+    let border = if filled { color } else { c_border() };
     ui.add(
         egui::Button::new(RichText::new(text).size(12.5).color(color))
             .fill(fill)
@@ -509,7 +714,7 @@ pub fn paint_icon(p: &egui::Painter, icon: Icon, c: Pos2, s: f32, color: Color32
 
 /// Brand mark for the rail: the VibeDrop pulse on a rounded blue tile.
 pub fn brand_mark(p: &egui::Painter, rect: Rect) {
-    p.rect_filled(rect, Rounding::same(rect.width() * 0.32), ACCENT);
+    p.rect_filled(rect, Rounding::same(rect.width() * 0.32), c_accent());
     let w = rect.width();
     let h = rect.height();
     // A single heartbeat line, drawn as a stroked polyline.
@@ -536,17 +741,17 @@ pub fn rail_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Resp
         let hovered = resp.hovered();
         let p = ui.painter();
         if selected {
-            p.rect_filled(rect, Rounding::same(18.0), ACCENT_FILL);
-            p.rect_stroke(rect, Rounding::same(18.0), Stroke::new(1.0_f32, ACCENT_DIM));
+            p.rect_filled(rect, Rounding::same(18.0), c_accent_fill());
+            p.rect_stroke(rect, Rounding::same(18.0), Stroke::new(1.0_f32, c_accent_dim()));
         } else if hovered {
-            p.rect_filled(rect, Rounding::same(18.0), CARD);
+            p.rect_filled(rect, Rounding::same(18.0), c_card());
         }
         let color = if selected {
-            ACCENT
+            c_accent()
         } else if hovered {
-            TEXT
+            c_text()
         } else {
-            TEXT_DIM
+            c_text_dim()
         };
         paint_icon(p, icon, Pos2::new(rect.center().x, rect.top() + 24.0), 20.0, color);
         p.text(
@@ -566,9 +771,9 @@ pub fn toolbar_button(ui: &mut Ui, icon: Icon, tip: &str) -> Response {
     if ui.is_rect_visible(rect) {
         let hovered = resp.hovered();
         if hovered {
-            ui.painter().rect_filled(rect, Rounding::same(6.0), CARD_HOVER);
+            ui.painter().rect_filled(rect, Rounding::same(6.0), c_card_hover());
         }
-        let color = if hovered { ACCENT } else { TEXT_DIM };
+        let color = if hovered { c_accent() } else { c_text_dim() };
         paint_icon(ui.painter(), icon, rect.center(), 18.0, color);
     }
     resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(tip)
@@ -580,14 +785,14 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool) -> Response
     if ui.is_rect_visible(rect) {
         let hovered = resp.hovered();
         if hovered {
-            ui.painter().rect_filled(rect, Rounding::same(8.0), CARD_HOVER);
+            ui.painter().rect_filled(rect, Rounding::same(8.0), c_card_hover());
         }
         let color = if active {
-            ACCENT
+            c_accent()
         } else if hovered {
-            TEXT
+            c_text()
         } else {
-            TEXT_DIM
+            c_text_dim()
         };
         paint_icon(ui.painter(), icon, rect.center(), size, color);
     }
@@ -601,14 +806,18 @@ pub fn round_button(ui: &mut Ui, icon: Icon, diameter: f32, primary: bool, enabl
     if ui.is_rect_visible(rect) {
         let hovered = resp.hovered() && enabled;
         let (bg, fg, stroke) = if !enabled {
-            (CARD_HOVER, TEXT_FAINT, Stroke::new(1.0_f32, BORDER))
+            (c_card_hover(), c_text_faint(), Stroke::new(1.0_f32, c_border()))
         } else if primary {
-            (if hovered { ACCENT_HOVER } else { ACCENT }, BG, Stroke::NONE)
+            (
+                if hovered { c_accent_hover() } else { c_accent() },
+                c_bg(),
+                Stroke::NONE,
+            )
         } else {
             (
-                if hovered { ACCENT_FILL } else { CARD_HOVER },
-                ACCENT,
-                Stroke::new(1.0_f32, if hovered { ACCENT } else { BORDER }),
+                if hovered { c_accent_fill() } else { c_card_hover() },
+                c_accent(),
+                Stroke::new(1.0_f32, if hovered { c_accent() } else { c_border() }),
             )
         };
         ui.painter().circle(rect.center(), diameter / 2.0, bg, stroke);
@@ -621,40 +830,47 @@ pub fn round_button(ui: &mut Ui, icon: Icon, diameter: f32, primary: bool, enabl
     }
 }
 
-/// Sidebar navigation row.
-pub fn nav_item(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Response {
+/// Sidebar navigation row. `show_label` = false draws only the icon.
+pub fn nav_item(ui: &mut Ui, icon: Icon, label: &str, selected: bool, show_label: bool) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let hovered = resp.hovered();
         let p = ui.painter();
         if selected {
-            p.rect_filled(rect, Rounding::same(10.0), ACCENT_FILL);
+            p.rect_filled(rect, Rounding::same(10.0), c_accent_fill());
             p.rect_filled(
                 Rect::from_min_max(
                     Pos2::new(rect.left(), rect.top() + 9.0),
                     Pos2::new(rect.left() + 3.0, rect.bottom() - 9.0),
                 ),
                 Rounding::same(2.0),
-                ACCENT,
+                c_accent(),
             );
         } else if hovered {
-            p.rect_filled(rect, Rounding::same(10.0), CARD);
+            p.rect_filled(rect, Rounding::same(10.0), c_card());
         }
         let color = if selected {
-            ACCENT
+            c_accent()
         } else if hovered {
-            TEXT
+            c_text()
         } else {
-            TEXT_DIM
+            c_text_dim()
         };
-        paint_icon(p, icon, Pos2::new(rect.left() + 24.0, rect.center().y), 20.0, color);
-        p.text(
-            Pos2::new(rect.left() + 48.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            FontId::new(15.0, FontFamily::Proportional),
-            color,
-        );
+        let icon_x = if show_label {
+            rect.left() + 24.0
+        } else {
+            rect.center().x
+        };
+        paint_icon(p, icon, Pos2::new(icon_x, rect.center().y), 20.0, color);
+        if show_label {
+            p.text(
+                Pos2::new(rect.left() + 48.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                FontId::new(15.0, FontFamily::Proportional),
+                color,
+            );
+        }
     }
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -663,7 +879,7 @@ pub fn nav_item(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Respons
 pub fn nav_pill(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Response {
     let text_width = ui
         .painter()
-        .layout_no_wrap(label.to_string(), FontId::new(14.5, FontFamily::Proportional), TEXT)
+        .layout_no_wrap(label.to_string(), FontId::new(14.5, FontFamily::Proportional), c_text())
         .rect
         .width();
     let (rect, resp) = ui.allocate_exact_size(vec2(text_width + 58.0, 42.0), Sense::click());
@@ -671,17 +887,17 @@ pub fn nav_pill(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Respons
         let hovered = resp.hovered();
         let p = ui.painter();
         if selected {
-            p.rect_filled(rect, Rounding::same(14.0), ACCENT_FILL);
-            p.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, ACCENT_DIM));
+            p.rect_filled(rect, Rounding::same(14.0), c_accent_fill());
+            p.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, c_accent_dim()));
         } else if hovered {
-            p.rect_filled(rect, Rounding::same(14.0), CARD);
+            p.rect_filled(rect, Rounding::same(14.0), c_card());
         }
         let color = if selected {
-            ACCENT
+            c_accent()
         } else if hovered {
-            TEXT
+            c_text()
         } else {
-            TEXT_DIM
+            c_text_dim()
         };
         paint_icon(p, icon, Pos2::new(rect.left() + 21.0, rect.center().y), 17.0, color);
         p.text(

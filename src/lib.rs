@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod audio;
+pub mod cable;
 pub mod discord;
 pub mod downloader;
 pub mod errors;
