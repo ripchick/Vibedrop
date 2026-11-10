@@ -125,27 +125,6 @@ struct HistoryItem {
     at: u64,
 }
 
-/// Messages from background helper threads.
-enum HelperMsg {
-    Cable(Result<(), String>),
-    /// Progress of the VB-CABLE download: (received, total).
-    CableProgress(u64, u64),
-    /// The VB-CABLE package was downloaded to this path.
-    CableReady(String),
-}
-
-/// State of the first-run setup wizard.
-#[derive(Default, Clone)]
-struct SetupState {
-    download_cable: bool,
-    cable_progress: f32,
-    cable_status: String,
-    cable_done: bool,
-    desktop_shortcut: bool,
-    autostart: bool,
-    busy: bool,
-}
-
 struct ActiveDownload {
     handle: DownloadHandle,
     received: u64,
@@ -242,12 +221,8 @@ pub struct VibeDropApp {
     dl_tx: Sender<DownloadEvent>,
     dl_rx: Receiver<DownloadEvent>,
 
-    helper_rx: Receiver<HelperMsg>,
-    helper_tx: Sender<HelperMsg>,
-
     discord: crate::discord::DiscordPresence,
     applied_theme: crate::settings::ThemeSettings,
-    setup: Option<SetupState>,
 
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
@@ -297,8 +272,6 @@ impl VibeDropApp {
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
         let applied_theme = settings.theme.clone();
-        let setup_done = settings.setup_done;
-        let (helper_tx, helper_rx) = unbounded::<HelperMsg>();
         let discord = crate::discord::DiscordPresence::start();
         let missing: HashSet<String> = library
             .entries
@@ -333,11 +306,8 @@ impl VibeDropApp {
             next_download: 1,
             dl_tx,
             dl_rx,
-            helper_rx,
-            helper_tx,
             discord,
             applied_theme,
-            setup: if setup_done { None } else { Some(SetupState::default()) },
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -1202,35 +1172,6 @@ impl VibeDropApp {
             }
         }
 
-        while let Ok(msg) = self.helper_rx.try_recv() {
-            match msg {
-                HelperMsg::Cable(result) => match result {
-                    Ok(()) => self.toast(
-                        ToastKind::Success,
-                        lang::t(&lang, "VB-CABLE downloaded: run VBCABLE_Setup_x64.exe as administrator, then select CABLE Input in Audio devices."),
-                    ),
-                    Err(e) => self.toast(ToastKind::Error, e),
-                },
-                HelperMsg::CableProgress(received, total) => {
-                    if let Some(setup) = self.setup.as_mut() {
-                        setup.cable_progress = if total > 0 {
-                            (received as f32 / total as f64 as f32).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                    }
-                }
-                HelperMsg::CableReady(path) => {
-                    if let Some(setup) = self.setup.as_mut() {
-                        setup.cable_done = true;
-                        setup.busy = false;
-                        setup.cable_status = path.clone();
-                    }
-                    self.toast(ToastKind::Success, lang::t(&lang, "VB-CABLE downloaded"));
-                }
-            }
-        }
-
         while let Ok(id) = self.hk_rx.try_recv() {
             if id == MIC_TOGGLE_ID {
                 let muted = self.engine.levels().mic_muted;
@@ -1491,27 +1432,32 @@ impl VibeDropApp {
     }
 
     /// The menu bar: one compact row of drop-downs, in the classic soundboard style.
-    fn draw_menubar(&mut self, ctx: &egui::Context) {
+    /// The window header: the menu row and (optionally) the transport strip, drawn as one
+    /// panel so no unpainted seam can appear between them.
+    fn draw_header(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
+        let now_id = self.now_playing.clone();
+        let playing = now_id.as_deref().is_some_and(|id| self.engine.is_playing(id));
+        let progress = now_id.as_deref().and_then(|id| self.engine.progress(id));
         let mut want_import = false;
         let mut want_url = false;
         let mut want_check = false;
         let mut want_quit = false;
         let mut want_about = false;
         let mut want_cable_page = false;
-        let mut want_setup = false;
         let mut go_page: Option<Page> = None;
-        let mut stop_all = false;
+        let mut toggle = false;
+        let mut levels_changed = false;
+        let mut seek: Option<f32> = None;
 
-        egui::TopBottomPanel::top("menubar")
-            .exact_height(28.0)
+        egui::TopBottomPanel::top("header")
             .frame(
                 egui::Frame::none()
                     .fill(theme::c_sidebar())
-                    .inner_margin(egui::Margin::symmetric(6.0, 2.0)),
+                    .inner_margin(egui::Margin::symmetric(10.0, 3.0)),
             )
             .show(ctx, |ui| {
-                // Flat menu items: no button frame, just the text (classic soundpad look).
+                // Flat menu items: no button frame, just the text (classic soundboard look).
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
                 ui.style_mut().visuals.widgets.inactive.bg_stroke = Stroke::NONE;
                 ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
@@ -1522,7 +1468,6 @@ impl VibeDropApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
 
-                    // Р¤Р°Р№Р»
                     ui.menu_button(lang::t(&lang, "File"), |ui| {
                         if ui.button(lang::t(&lang, "Import")).clicked() {
                             want_import = true;
@@ -1536,17 +1481,12 @@ impl VibeDropApp {
                             want_check = true;
                             ui.close_menu();
                         }
-                        if ui.button(lang::t(&lang, "Setup")).clicked() {
-                            want_setup = true;
-                            ui.close_menu();
-                        }
                         ui.separator();
                         if ui.button(lang::t(&lang, "Quit VibeDrop")).clicked() {
                             want_quit = true;
                             ui.close_menu();
                         }
                     });
-                    // Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ
                     ui.menu_button(lang::t(&lang, "Edit"), |ui| {
                         if ui.button(lang::t(&lang, "Import")).clicked() {
                             want_import = true;
@@ -1557,10 +1497,9 @@ impl VibeDropApp {
                             ui.close_menu();
                         }
                     });
-                    // Р’РѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёРµ
                     ui.menu_button(lang::t(&lang, "Playback"), |ui| {
                         if ui.button(lang::t(&lang, "Stop All")).clicked() {
-                            stop_all = true;
+                            self.engine.stop_all();
                             ui.close_menu();
                         }
                         if ui.button(lang::t(&lang, "Test sound")).clicked() {
@@ -1568,7 +1507,6 @@ impl VibeDropApp {
                             ui.close_menu();
                         }
                     });
-                    // Р’РёРґ
                     ui.menu_button(lang::t(&lang, "Window"), |ui| {
                         for page in Page::ALL {
                             if ui.button(lang::t(&lang, page.title())).clicked() {
@@ -1577,7 +1515,6 @@ impl VibeDropApp {
                             }
                         }
                     });
-                    // РЎРїСЂР°РІРєР°
                     ui.menu_button(lang::t(&lang, "Help"), |ui| {
                         if ui.button(lang::t(&lang, "Official VB-CABLE page")).clicked() {
                             want_cable_page = true;
@@ -1589,63 +1526,9 @@ impl VibeDropApp {
                         }
                     });
                 });
-            });
 
-        if want_import {
-            self.pick_and_import();
-        }
-        if want_url {
-            self.url_dialog = Some(UrlDialog {
-                text: String::new(),
-                error: None,
-                focus: true,
-            });
-        }
-        if want_check {
-            self.check_library_files();
-        }
-        if let Some(page) = go_page {
-            self.page = page;
-            if page == Page::Settings {
-                self.protocol_state = system::protocol_state();
-            }
-        }
-        if want_cable_page {
-            ctx.open_url(egui::OpenUrl::new_tab("https://vb-audio.com/Cable/"));
-        }
-        if want_setup {
-            self.setup = Some(SetupState::default());
-        }
-        if want_about {
-            self.about = true;
-        }
-        if stop_all {
-            self.engine.stop_all();
-        }
-        if want_quit {
-            self.quitting = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-    }
-    /// The transport row: play/stop, time, a seekable progress bar and the master volume.
-    fn draw_transport(&mut self, ctx: &egui::Context) {
-        let lang = self.settings.language.clone();
-        let now_id = self.now_playing.clone();
-        let playing = now_id.as_deref().is_some_and(|id| self.engine.is_playing(id));
-        let progress = now_id.as_deref().and_then(|id| self.engine.progress(id));
-        let mut toggle = false;
-        let mut levels_changed = false;
-        let mut seek: Option<f32> = None;
-        if self.settings.theme.show_transport {
-            egui::TopBottomPanel::top("transport")
-                .exact_height(42.0)
-                .frame(
-                    egui::Frame::none()
-                        .fill(theme::c_sidebar())
-                        .stroke(Stroke::new(1.0_f32, theme::c_border()))
-                        .inner_margin(egui::Margin::symmetric(10.0, 5.0)),
-                )
-                .show(ctx, |ui| {
+                if self.settings.theme.show_transport {
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let icon = if playing { Icon::Stop } else { Icon::Play };
@@ -1653,7 +1536,9 @@ impl VibeDropApp {
                             toggle = true;
                         }
                         let time_text = match progress {
-                            Some((pos, total)) => format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total)),
+                            Some((pos, total)) => {
+                                format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total))
+                            }
                             None => "0:00".to_string(),
                         };
                         ui.label(
@@ -1689,7 +1574,37 @@ impl VibeDropApp {
                         levels_changed |=
                             volume_row_inline(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
                     });
-                });
+                }
+            });
+
+        if want_import {
+            self.pick_and_import();
+        }
+        if want_url {
+            self.url_dialog = Some(UrlDialog {
+                text: String::new(),
+                error: None,
+                focus: true,
+            });
+        }
+        if want_check {
+            self.check_library_files();
+        }
+        if let Some(page) = go_page {
+            self.page = page;
+            if page == Page::Settings {
+                self.protocol_state = system::protocol_state();
+            }
+        }
+        if want_cable_page {
+            ctx.open_url(egui::OpenUrl::new_tab(crate::cable::VB_CABLE_PAGE));
+        }
+        if want_about {
+            self.about = true;
+        }
+        if want_quit {
+            self.quitting = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if levels_changed {
             self.engine.set_levels(self.levels());
@@ -1710,7 +1625,6 @@ impl VibeDropApp {
             }
         }
     }
-    /// The bottom status strip: what is selected, counters and the quick actions.
     fn draw_bottombar(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
         let mic_state = self.engine.route_state(OutputRole::Secondary);
@@ -2348,177 +2262,6 @@ impl VibeDropApp {
         self.discord.set(details, state, started);
     }
 
-    // ---- First-run setup wizard -----------------------------------------------------------
-
-    /// The setup wizard shown on the first launch: the user picks what to install
-    /// (the free VB-CABLE virtual cable, a desktop shortcut, autostart) and VibeDrop
-    /// performs the steps before the main window appears.
-    fn draw_setup(&mut self, ctx: &egui::Context) {
-        let lang = self.settings.language.clone();
-        let mut install = false;
-        let mut finish = false;
-        let mut open_cable_folder = false;
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::none()
-                    .fill(theme::c_bg())
-                    .inner_margin(egui::Margin::symmetric(40.0, 32.0)),
-            )
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    let (mark, _) = ui.allocate_exact_size(vec2(86.0, 86.0), Sense::hover());
-                    theme::brand_mark(ui.painter(), mark);
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        ui.label(RichText::new("Vibe").size(34.0).strong().color(theme::c_text()));
-                        ui.label(RichText::new("Drop").size(34.0).strong().color(theme::c_accent()));
-                    });
-                    ui.label(
-                        RichText::new(lang::t(&lang, "Setup — soundboard for voice chats"))
-                            .size(14.0)
-                            .color(theme::c_text_dim()),
-                    );
-                    ui.add_space(22.0);
-                    let mut state = self.setup.clone().unwrap_or_default();
-                    theme::frame_card().show(ui, |ui| {
-                        ui.set_width(560.0);
-                        theme::section_title(ui, lang::t(&lang, "WHAT TO INSTALL"));
-                        ui.add_space(6.0);
-                        ui.checkbox(
-                            &mut state.download_cable,
-                            lang::t(&lang, "Download the free VB-CABLE virtual audio cable"),
-                        );
-                        ui.label(
-                            RichText::new(lang::t(
-                                &lang,
-                                "VB-CABLE is freeware by VB-Audio, downloaded from the official site (vb-audio.com). VibeDrop is an independent project and is not affiliated with VB-Audio; the driver itself is not part of VibeDrop and is never redistributed here.",
-                            ))
-                            .size(11.5)
-                            .color(theme::c_text_faint()),
-                        );
-                        ui.hyperlink_to(
-                            lang::t(&lang, "Open the official VB-CABLE page"),
-                            "https://vb-audio.com/Cable/",
-                        );
-                        ui.add_space(8.0);
-                        ui.checkbox(
-                            &mut state.desktop_shortcut,
-                            lang::t(&lang, "Create a desktop shortcut"),
-                        );
-                        ui.checkbox(
-                            &mut state.autostart,
-                            lang::t(&lang, "Start VibeDrop when I log in"),
-                        );
-                        ui.add_space(10.0);
-                        if state.download_cable {
-                            if state.cable_done {
-                                ui.label(
-                                    RichText::new(lang::t(&lang, "VB-CABLE downloaded:"))
-                                        .color(theme::c_accent()),
-                                );
-                                ui.label(
-                                    RichText::new(state.cable_status.clone())
-                                        .size(11.5)
-                                        .color(theme::c_text_faint()),
-                                );
-                                if theme::secondary_button(ui, lang::t(&lang, "Open the folder")).clicked() {
-                                    open_cable_folder = true;
-                                }
-                            } else {
-                                ui.label(RichText::new(lang::t(&lang, "Downloading…")).color(theme::c_text_dim()));
-                                let _ = egui::ProgressBar::new(state.cable_progress)
-                                    .desired_width(520.0);
-                            }
-                        }
-                    });
-
-                    ui.add_space(18.0);
-                    ui.horizontal(|ui| {
-                        if theme::secondary_button(ui, lang::t(&lang, "Skip")).clicked() {
-                            finish = true;
-                        }
-                        if state.cable_done {
-                            if theme::primary_button(ui, lang::t(&lang, "Start VibeDrop")).clicked() {
-                                finish = true;
-                            }
-                        } else {
-                            if theme::primary_button(ui, lang::t(&lang, "Install")).clicked() {
-                                install = true;
-                            }
-                        }
-                    });
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(lang::t(
-                            &lang,
-                            "VibeDrop is free and open source (Apache-2.0). Your library and settings are stored in your user profile and never leave your computer.",
-                        ))
-                        .size(11.5)
-                        .color(theme::c_text_faint()),
-                    );
-                    if let Some(setup) = self.setup.as_mut() {
-                        setup.download_cable = state.download_cable;
-                        setup.desktop_shortcut = state.desktop_shortcut;
-                        setup.autostart = state.autostart;
-                        setup.cable_progress = state.cable_progress;
-                        setup.cable_status = state.cable_status.clone();
-                        setup.cable_done = state.cable_done;
-                    }
-                });
-            });
-
-        if install {
-            self.run_setup();
-        }
-        if open_cable_folder {
-            let dir = self
-                .paths
-                .root()
-                .parent()
-                .map(|p| p.join("Downloads"))
-                .unwrap_or_else(|| self.paths.root().to_path_buf());
-            let _ = std::process::Command::new("explorer").arg(dir).spawn();
-        }
-        if finish {
-            self.settings.setup_done = true;
-            self.settings_dirty = true;
-            self.save_settings();
-            self.setup = None;
-        }
-    }
-
-    /// Perform the steps the user selected in the setup wizard.
-    fn run_setup(&mut self) {
-        let Some(setup) = self.setup.as_mut() else {
-            return;
-        };
-        if setup.busy {
-            return;
-        }
-        setup.busy = true;
-        if setup.desktop_shortcut {
-            let _ = system::create_desktop_shortcut();
-        }
-        if setup.autostart {
-            let _ = system::set_autostart(true);
-        }
-        if setup.download_cable && !setup.cable_done {
-            let tx = self.helper_tx.clone();
-            let dest = self.paths.root().join("VBCABLE_Driver_Pack45.zip");
-            std::thread::spawn(move || match download_vbcable_with_progress(&dest, &tx) {
-                Ok(()) => {
-                    let _ = tx.send(HelperMsg::CableReady(dest.display().to_string()));
-                }
-                Err(e) => {
-                    let _ = tx.send(HelperMsg::Cable(Err(e)));
-                }
-            });
-        } else {
-            setup.busy = false;
-        }
-    }
-
     // ---- Drawing: history --------------------------------------------------------------------
 
     fn draw_history_page(&mut self, ui: &mut Ui) {
@@ -2609,8 +2352,8 @@ impl VibeDropApp {
         let mut refresh_devices = false;
         let mut test: Option<OutputRole> = None;
         let mut test_route = false;
-        let mut want_cable = false;
         let mut want_sink = false;
+        let mut want_cable_page = false;
         let mut edit_mic_hotkey = false;
         let mut clear_mic_hotkey = false;
         let devices = self.engine.devices();
@@ -2928,10 +2671,9 @@ impl VibeDropApp {
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if cfg!(target_os = "windows")
-                            && theme::secondary_button(ui, lang::t(&lang, "Download free VB-CABLE")).clicked()
+                        if theme::secondary_button(ui, lang::t(&lang, "Open the official VB-CABLE page")).clicked()
                         {
-                            want_cable = true;
+                            want_cable_page = true;
                         }
                         if cfg!(target_os = "linux")
                             && theme::secondary_button(ui, lang::t(&lang, "Create built-in virtual sink")).clicked()
@@ -3376,14 +3118,6 @@ impl VibeDropApp {
             self.route_test = None;
             self.route_test_running = true;
             self.engine.test_route();
-        }
-        if want_cable {
-            let tx = self.helper_tx.clone();
-            let dest = self.paths.root().join("VBCABLE_Driver_Pack45.zip");
-            std::thread::spawn(move || {
-                let result = download_vbcable(&dest);
-                let _ = tx.send(HelperMsg::Cable(result));
-            });
         }
         if want_sink {
             let output = std::process::Command::new("pactl")
@@ -4015,33 +3749,6 @@ fn mic_device_combo(ui: &mut Ui, lang: &str, id: &str, value: &mut Option<String
         });
 }
 
-/// Download the official freeware VB-CABLE installer zip (vb-audio.com) to `dest`.
-/// The driver itself is never bundled inside VibeDrop.
-fn download_vbcable(dest: &std::path::Path) -> Result<(), String> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("VibeDrop/0.3 (desktop soundboard; free cable helper)")
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get("https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip")
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    let bytes = resp.bytes().map_err(|e| e.to_string())?;
-    std::fs::write(dest, bytes).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Download the official freeware VB-CABLE package, reporting progress to the UI.
-fn download_vbcable_with_progress(dest: &std::path::Path, tx: &Sender<HelperMsg>) -> Result<(), String> {
-    crate::cable::download(dest, |received, total| {
-        let _ = tx.try_send(HelperMsg::CableProgress(received, total));
-    })
-}
-
 /// Write interleaved stereo f32 samples as a 16-bit PCM WAV file.
 fn write_wav16(path: &std::path::Path, samples: &[f32], rate: u32) -> std::io::Result<()> {
     use std::io::Write;
@@ -4257,13 +3964,7 @@ impl eframe::App for VibeDropApp {
             theme::apply_settings(ctx, &self.settings.theme);
         }
 
-        if self.setup.is_some() {
-            self.draw_setup(ctx);
-            return;
-        }
-
-        self.draw_menubar(ctx);
-        self.draw_transport(ctx);
+        self.draw_header(ctx);
         self.draw_sidebar(ctx);
         self.draw_bottombar(ctx);
         self.draw_central(ctx);

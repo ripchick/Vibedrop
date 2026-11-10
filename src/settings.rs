@@ -72,9 +72,6 @@ pub struct Settings {
     pub theme: ThemeSettings,
     /// Behaviour of the sound table and the player.
     pub playback: PlaybackSettings,
-    /// Whether the first-run setup wizard was completed.
-    #[serde(default)]
-    pub setup_done: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -172,7 +169,6 @@ impl Default for Settings {
             delete_managed_copy_on_remove: false,
             theme: ThemeSettings::default(),
             playback: PlaybackSettings::default(),
-            setup_done: false,
         }
     }
 }

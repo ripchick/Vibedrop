@@ -46,18 +46,17 @@ status bar — no audio driver bundled or required, Windows, Linux and macOS sup
   only opened on request, never opened as an output, and the route's own recording side is
   refused as a voice source (feedback-loop protection).
 
-## First run
+## Free virtual audio cable (VB-CABLE)
 
-VibeDrop opens with a setup wizard instead of the main window:
+Voice chats need a virtual cable so that your microphone picks up the soundboard. VibeDrop
+does **not** bundle or download a driver — it only opens the official page of the freeware
+product [VB-CABLE by VB-Audio](https://vb-audio.com/Cable/) (menu *Help → Official VB-CABLE
+page* or Settings → *Virtual output (FREE)*). Download and install it there (one time, as
+administrator), then pick *CABLE Input* as the microphone route in VibeDrop.
 
-* **Download the free VB-CABLE virtual audio cable** — fetches the official freeware package
-  from VB-Audio (vb-audio.com) into your data folder, with a progress bar. VB-CABLE is a
-  separate product by VB-Audio: it is not part of VibeDrop, is not redistributed here and
-  VibeDrop is not affiliated with VB-Audio. You install it once, as administrator, and pick
-  *CABLE Input* as the microphone route.
-* **Create a desktop shortcut** and **start VibeDrop when you log in** (Windows).
-
-The wizard can be opened again at any time from *File → Setup*.
+VB-CABLE is a separate product of VB-Audio; VibeDrop is an independent project, is not
+affiliated with VB-Audio and never redistributes the driver. On Linux, VibeDrop can create a
+built-in virtual sink (PipeWire/PulseAudio) without installing anything.
 
 ## Features
 
