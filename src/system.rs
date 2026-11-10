@@ -294,6 +294,7 @@ pub fn create_desktop_shortcut() -> Result<(), String> {
     }
 }
 
+#[cfg(windows)]
 fn desktop_dir() -> String {
     std::env::var("USERPROFILE")
         .map(|p| format!("{p}\\Desktop"))
