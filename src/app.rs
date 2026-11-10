@@ -3344,19 +3344,27 @@ impl VibeDropApp {
             }
         }
         if import_backup {
-            let picked = rfd::FileDialog::new()
-                .set_title(lang::t(&lang, "Import backup"))
-                .add_filter("VibeDrop backup", &["json"])
-                .pick_file();
-            if let Some(path) = picked {
-                match self.import_backup(&path) {
-                    Ok(()) => {
-                        let text = lang::t(&lang, "Backup restored. Restart VibeDrop to apply it.");
-                        self.toast(ToastKind::Success, text);
+            #[cfg(not(target_os = "android"))]
+            {
+                let picked = rfd::FileDialog::new()
+                    .set_title(lang::t(&lang, "Import backup"))
+                    .add_filter("VibeDrop backup", &["json"])
+                    .pick_file();
+                if let Some(path) = picked {
+                    match self.import_backup(&path) {
+                        Ok(()) => {
+                            let text = lang::t(&lang, "Backup restored. Restart VibeDrop to apply it.");
+                            self.toast(ToastKind::Success, text);
+                        }
+                        Err(e) => self.toast(ToastKind::Error, e),
                     }
-                    Err(e) => self.toast(ToastKind::Error, e),
                 }
             }
+            #[cfg(target_os = "android")]
+            self.toast(
+                ToastKind::Info,
+                lang::t(&lang, "File import is not available on this platform yet."),
+            );
         }
         if open_data_folder {
             self.open_data_folder();
