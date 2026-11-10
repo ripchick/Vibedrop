@@ -1,4 +1,4 @@
-//! Central visual identity of VibeDrop: DARK FLUENT (Windows-style, Soundpad layout).
+//! Central visual identity of VibeDrop: CLASSIC SOUNDBOARD (dark grey + blue).
 //!
 //! All colors live here. `apply` installs the palette into egui, and the helpers below draw
 //! buttons, cards and icons that match it. Icons are painted with shapes (not font glyphs), so
@@ -11,32 +11,32 @@ use eframe::egui::{
 
 // ---- Palette ---------------------------------------------------------------------------------
 
-/// Window / page background `#202020` (Win11 dark base).
-pub const BG: Color32 = Color32::from_rgb(0x20, 0x20, 0x20);
-/// Cards and panels `#2B2B2B`.
-pub const CARD: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
+/// Window / page background `#3C3C3C` (soundboard grey).
+pub const BG: Color32 = Color32::from_rgb(0x3C, 0x3C, 0x3C);
+/// Cards and panels `#4A4A4A`.
+pub const CARD: Color32 = Color32::from_rgb(0x4A, 0x4A, 0x4A);
 /// Card under the pointer.
-pub const CARD_HOVER: Color32 = Color32::from_rgb(0x34, 0x34, 0x34);
-/// Menubar / transport / bottom bar, a touch darker than the cards.
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x1B, 0x1B, 0x1B);
+pub const CARD_HOVER: Color32 = Color32::from_rgb(0x56, 0x56, 0x56);
+/// Rail / deck background, a touch darker than the cards.
+pub const SIDEBAR: Color32 = Color32::from_rgb(0x45, 0x45, 0x45);
 /// Input fields and slider rails.
-pub const INPUT_BG: Color32 = Color32::from_rgb(0x2A, 0x2A, 0x2A);
-/// Primary accent `#4CC2FF` (Windows dark-mode default accent).
-pub const ACCENT: Color32 = Color32::from_rgb(0x4C, 0xC2, 0xFF);
+pub const INPUT_BG: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+/// Primary accent `#2E9BE6` (soundboard blue).
+pub const ACCENT: Color32 = Color32::from_rgb(0x2E, 0x9B, 0xE6);
 /// Accent on hover (slightly lighter).
-pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x6B, 0xDB, 0xFF);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x4A, 0xB4, 0xF5);
 /// Muted accent for secondary strokes.
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2A, 0x6B, 0xA8);
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x1E, 0x6B, 0xA6);
 /// Dark blue tint used behind selected / hovered accent elements.
-pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x1B, 0x3A, 0x52);
+pub const ACCENT_FILL: Color32 = Color32::from_rgb(0x1F, 0x3F, 0x5C);
 /// Secondary accent for highlights and the brand mark.
 pub const ACCENT_ALT: Color32 = Color32::from_rgb(0x7C, 0xF0, 0xD4);
 /// Borders `#2E2E2E`.
 pub const BORDER: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2E);
-/// Main text `#FFFFFF`.
-pub const TEXT: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xFF);
+/// Main text `#F2F2F2`.
+pub const TEXT: Color32 = Color32::from_rgb(0xF2, 0xF2, 0xF2);
 /// Secondary text.
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0xC8, 0xC8, 0xC8);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0xC0, 0xC0, 0xC0);
 /// Disabled text and icons.
 pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8A, 0x8A, 0x8A);
 /// Errors and destructive actions.
@@ -255,6 +255,7 @@ pub fn chip(ui: &mut Ui, text: &str, color: Color32, filled: bool) -> Response {
 pub enum Icon {
     Play,
     Stop,
+    Pause,
     Star,
     StarOutline,
     Library,
@@ -263,6 +264,20 @@ pub enum Icon {
     Volume,
     Search,
     Quit,
+    /// Headphones (listen device).
+    Headphones,
+    /// Microphone.
+    Mic,
+    /// "Add" / plus.
+    Plus,
+    /// Home / category.
+    Home,
+    /// Stop-all square.
+    StopAll,
+    /// Undo / reload.
+    Reload,
+    /// Wrench / settings shortcut.
+    Wrench,
 }
 
 fn star_points(c: Pos2, outer: f32) -> Vec<Pos2> {
@@ -383,32 +398,135 @@ pub fn paint_icon(p: &egui::Painter, icon: Icon, c: Pos2, s: f32, color: Color32
                 Stroke::new(stroke.width + 0.5, color),
             ));
         }
+        Icon::Pause => {
+            let h = s * 0.34;
+            let w = s * 0.11;
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x - s * 0.16, c.y), vec2(w, h * 2.0)),
+                Rounding::same(s * 0.03),
+                color,
+            );
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x + s * 0.16, c.y), vec2(w, h * 2.0)),
+                Rounding::same(s * 0.03),
+                color,
+            );
+        }
+        Icon::Headphones => {
+            p.circle_stroke(c, s * 0.40, stroke);
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x - s * 0.30, c.y + s * 0.12), vec2(s * 0.16, s * 0.26)),
+                Rounding::same(s * 0.05),
+                color,
+            );
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x + s * 0.30, c.y + s * 0.12), vec2(s * 0.16, s * 0.26)),
+                Rounding::same(s * 0.05),
+                color,
+            );
+        }
+        Icon::Mic => {
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x, c.y - s * 0.10), vec2(s * 0.24, s * 0.42)),
+                Rounding::same(s * 0.12),
+                color,
+            );
+            let arc = (-3..=3)
+                .map(|i| {
+                    let a = i as f32 * 0.28;
+                    Pos2::new(c.x + a * s * 0.34, c.y + s * 0.16 + a * a * s * 0.06)
+                })
+                .collect::<Vec<_>>();
+            p.add(Shape::line(arc, stroke));
+            p.add(Shape::line_segment(
+                [Pos2::new(c.x, c.y + s * 0.30), Pos2::new(c.x, c.y + s * 0.42)],
+                stroke,
+            ));
+        }
+        Icon::Plus => {
+            p.add(Shape::line_segment(
+                [Pos2::new(c.x - s * 0.34, c.y), Pos2::new(c.x + s * 0.34, c.y)],
+                stroke,
+            ));
+            p.add(Shape::line_segment(
+                [Pos2::new(c.x, c.y - s * 0.34), Pos2::new(c.x, c.y + s * 0.34)],
+                stroke,
+            ));
+        }
+        Icon::Home => {
+            p.add(Shape::convex_polygon(
+                vec![
+                    Pos2::new(c.x - s * 0.40, c.y + s * 0.02),
+                    Pos2::new(c.x, c.y - s * 0.34),
+                    Pos2::new(c.x + s * 0.40, c.y + s * 0.02),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x, c.y + s * 0.20), vec2(s * 0.54, s * 0.34)),
+                Rounding::same(s * 0.05),
+                color,
+            );
+        }
+        Icon::StopAll => {
+            p.rect_filled(
+                Rect::from_center_size(c, vec2(s * 0.52, s * 0.52)),
+                Rounding::same(s * 0.06),
+                color,
+            );
+        }
+        Icon::Reload => {
+            let arc = (0..=10)
+                .map(|i| {
+                    let a = i as f32 * 0.42 - 1.2;
+                    Pos2::new(c.x + a.cos() * s * 0.30, c.y + a.sin() * s * 0.30)
+                })
+                .collect::<Vec<_>>();
+            p.add(Shape::line(arc, stroke));
+            p.add(Shape::convex_polygon(
+                vec![
+                    Pos2::new(c.x + s * 0.16, c.y - s * 0.44),
+                    Pos2::new(c.x + s * 0.40, c.y - s * 0.20),
+                    Pos2::new(c.x + s * 0.10, c.y - s * 0.16),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Wrench => {
+            p.add(Shape::line_segment(
+                [
+                    Pos2::new(c.x - s * 0.30, c.y + s * 0.30),
+                    Pos2::new(c.x + s * 0.16, c.y - s * 0.16),
+                ],
+                stroke,
+            ));
+            p.circle_stroke(Pos2::new(c.x + s * 0.22, c.y - s * 0.22), s * 0.20, stroke);
+        }
     }
 }
 
-/// Brand mark for the rail: a rounded equalizer glyph.
+/// Brand mark for the rail: the VibeDrop pulse on a rounded blue tile.
 pub fn brand_mark(p: &egui::Painter, rect: Rect) {
-    p.rect_filled(rect, Rounding::same(16.0), ACCENT_FILL);
-    p.rect_stroke(rect, Rounding::same(16.0), Stroke::new(1.0_f32, ACCENT_DIM));
+    p.rect_filled(rect, Rounding::same(rect.width() * 0.32), ACCENT);
     let w = rect.width();
     let h = rect.height();
-    let bars = [
-        (0.24, 0.34, ACCENT),
-        (0.42, 0.56, ACCENT_ALT),
-        (0.58, 0.44, ACCENT),
-        (0.76, 0.68, ACCENT_ALT),
+    // A single heartbeat line, drawn as a stroked polyline.
+    let pts = [
+        (-0.42, 0.02),
+        (-0.26, 0.02),
+        (-0.14, -0.30),
+        (0.02, 0.34),
+        (0.16, -0.12),
+        (0.26, 0.02),
+        (0.42, 0.02),
     ];
-    for (x_frac, h_frac, color) in bars {
-        let bw = w * 0.085;
-        let bh = h * h_frac;
-        let x = rect.left() + w * x_frac - bw / 2.0;
-        let y = rect.center().y - bh / 2.0;
-        p.rect_filled(
-            Rect::from_min_size(Pos2::new(x, y), vec2(bw, bh)),
-            Rounding::same(bw / 2.0),
-            color,
-        );
-    }
+    let line: Vec<Pos2> = pts
+        .iter()
+        .map(|(x, y)| Pos2::new(rect.center().x + x * w, rect.center().y + y * h))
+        .collect();
+    p.add(Shape::line(line, Stroke::new((w * 0.085).max(1.8), Color32::WHITE)));
 }
 
 /// Rail navigation button with icon and tiny label.
@@ -440,6 +558,20 @@ pub fn rail_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> Resp
         );
     }
     resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// A flat toolbar button with an icon and a tiny caption (soundboard style).
+pub fn toolbar_button(ui: &mut Ui, icon: Icon, tip: &str) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let hovered = resp.hovered();
+        if hovered {
+            ui.painter().rect_filled(rect, Rounding::same(6.0), CARD_HOVER);
+        }
+        let color = if hovered { ACCENT } else { TEXT_DIM };
+        paint_icon(ui.painter(), icon, rect.center(), 18.0, color);
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(tip)
 }
 
 /// Flat, square icon button. `active` tints it with the accent color.

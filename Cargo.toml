@@ -1,6 +1,6 @@
 [package]
 name = "vibedrop"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "VibeDrop - a free open-source soundboard with dual audio output"
 license = "Apache-2.0"
@@ -36,6 +36,7 @@ percent-encoding = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+winapi = { version = "0.3", features = ["fileapi", "handleapi", "winnt"] }
 
 # File dialogs exist on desktop only (rfd has no Android backend).
 [target.'cfg(not(target_os = "android"))'.dependencies]

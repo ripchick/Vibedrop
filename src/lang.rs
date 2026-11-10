@@ -42,6 +42,7 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "About VibeDrop" => "О VibeDrop",
         "Official VB-CABLE page" => "Официальная страница VB-CABLE",
         "Open official VB-CABLE page" => "Открыть официальную страницу VB-CABLE",
+        "CATEGORY" => "КАТЕГОРИЯ",
         "Sounds" => "Звуки",
         "Plays" => "Воспроизведений",
         "My sounds" => "Мои звуки",

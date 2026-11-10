@@ -229,6 +229,8 @@ pub struct VibeDropApp {
     helper_rx: Receiver<HelperMsg>,
     helper_tx: Sender<HelperMsg>,
 
+    discord: crate::discord::DiscordPresence,
+
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
     url_dialog: Option<UrlDialog>,
@@ -277,6 +279,7 @@ impl VibeDropApp {
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
         let (helper_tx, helper_rx) = unbounded::<HelperMsg>();
+        let discord = crate::discord::DiscordPresence::start();
         let missing: HashSet<String> = library
             .entries
             .iter()
@@ -312,6 +315,7 @@ impl VibeDropApp {
             dl_rx,
             helper_rx,
             helper_tx,
+            discord,
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -1273,36 +1277,44 @@ impl VibeDropApp {
             return;
         }
         egui::SidePanel::left("sidebar")
-            .exact_width(204.0)
+            .exact_width(196.0)
             .resizable(false)
             .frame(
                 egui::Frame::none()
                     .fill(theme::SIDEBAR)
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(16.0, 18.0)),
+                    .inner_margin(egui::Margin::symmetric(12.0, 14.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let (mark, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
+                    let (mark, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
                     theme::brand_mark(ui.painter(), mark);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
-                            ui.label(RichText::new("Vibe").size(20.0).strong().color(theme::TEXT));
-                            ui.label(RichText::new("Drop").size(20.0).strong().color(theme::ACCENT));
+                            ui.label(RichText::new("Vibe").size(18.0).strong().color(theme::TEXT));
+                            ui.label(RichText::new("Drop").size(18.0).strong().color(theme::ACCENT));
                         });
-                        ui.label(RichText::new("SOUNDBOARD").size(9.5).strong().color(theme::TEXT_FAINT));
+                        ui.label(RichText::new("SOUNDBOARD").size(9.0).strong().color(theme::TEXT_FAINT));
                     });
                 });
-                ui.add_space(20.0);
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new(lang::t(&lang, "CATEGORY"))
+                        .size(10.5)
+                        .strong()
+                        .color(theme::TEXT_FAINT),
+                );
+                ui.add_space(3.0);
                 for page in Page::ALL {
                     let label = if page == Page::Library {
                         lang::t(&lang, "My sounds")
                     } else {
                         lang::t(&lang, page.title())
                     };
-                    if theme::nav_item(ui, page.icon(), label, self.page == page).clicked() {
+                    let icon = if page == Page::Library { Icon::Home } else { page.icon() };
+                    if theme::nav_item(ui, icon, label, self.page == page).clicked() {
                         self.page = page;
                         if page == Page::Settings {
                             self.protocol_state = system::protocol_state();
@@ -1324,6 +1336,7 @@ impl VibeDropApp {
             });
     }
 
+    /// The menu bar: one compact row of drop-downs, in the classic soundboard style.
     fn draw_menubar(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
         let mut want_import = false;
@@ -1333,17 +1346,21 @@ impl VibeDropApp {
         let mut want_about = false;
         let mut want_cable_page = false;
         let mut go_page: Option<Page> = None;
+        let mut stop_all = false;
+
         egui::TopBottomPanel::top("menubar")
+            .exact_height(28.0)
             .frame(
                 egui::Frame::none()
                     .fill(theme::SIDEBAR)
-                    .inner_margin(egui::Margin::symmetric(10.0, 3.0)),
+                    .stroke(Stroke::new(1.0_f32, theme::BORDER))
+                    .inner_margin(egui::Margin::symmetric(6.0, 2.0)),
             )
             .show(ctx, |ui| {
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
-                ui.style_mut().visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-                ui.style_mut().visuals.widgets.hovered.bg_fill = theme::CARD_HOVER;
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+
+                    // Р¤Р°Р№Р»
                     ui.menu_button(lang::t(&lang, "File"), |ui| {
                         if ui.button(lang::t(&lang, "Import")).clicked() {
                             want_import = true;
@@ -1363,9 +1380,21 @@ impl VibeDropApp {
                             ui.close_menu();
                         }
                     });
+                    // Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ
+                    ui.menu_button(lang::t(&lang, "Edit"), |ui| {
+                        if ui.button(lang::t(&lang, "Import")).clicked() {
+                            want_import = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(lang::t(&lang, "Check files")).clicked() {
+                            want_check = true;
+                            ui.close_menu();
+                        }
+                    });
+                    // Р’РѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёРµ
                     ui.menu_button(lang::t(&lang, "Playback"), |ui| {
                         if ui.button(lang::t(&lang, "Stop All")).clicked() {
-                            self.engine.stop_all();
+                            stop_all = true;
                             ui.close_menu();
                         }
                         if ui.button(lang::t(&lang, "Test sound")).clicked() {
@@ -1373,6 +1402,7 @@ impl VibeDropApp {
                             ui.close_menu();
                         }
                     });
+                    // Р’РёРґ
                     ui.menu_button(lang::t(&lang, "Window"), |ui| {
                         for page in Page::ALL {
                             if ui.button(lang::t(&lang, page.title())).clicked() {
@@ -1381,6 +1411,7 @@ impl VibeDropApp {
                             }
                         }
                     });
+                    // РЎРїСЂР°РІРєР°
                     ui.menu_button(lang::t(&lang, "Help"), |ui| {
                         if ui.button(lang::t(&lang, "Official VB-CABLE page")).clicked() {
                             want_cable_page = true;
@@ -1393,6 +1424,7 @@ impl VibeDropApp {
                     });
                 });
             });
+
         if want_import {
             self.pick_and_import();
         }
@@ -1418,12 +1450,15 @@ impl VibeDropApp {
         if want_about {
             self.about = true;
         }
+        if stop_all {
+            self.engine.stop_all();
+        }
         if want_quit {
             self.quitting = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
-
+    /// The transport row: play/stop, time, a seekable progress bar and the master volume.
     fn draw_transport(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
         let now_id = self.now_playing.clone();
@@ -1433,31 +1468,33 @@ impl VibeDropApp {
         let mut levels_changed = false;
         let mut seek: Option<f32> = None;
         egui::TopBottomPanel::top("transport")
+            .exact_height(42.0)
             .frame(
                 egui::Frame::none()
                     .fill(theme::SIDEBAR)
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(12.0, 6.0)),
+                    .inner_margin(egui::Margin::symmetric(10.0, 5.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
                     let icon = if playing { Icon::Stop } else { Icon::Play };
-                    if theme::round_button(ui, icon, 30.0, true, now_id.is_some()).clicked() {
+                    if theme::toolbar_button(ui, icon, lang::t(&lang, "Play")).clicked() {
                         toggle = true;
                     }
                     let time_text = match progress {
                         Some((pos, total)) => format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total)),
                         None => "0:00".to_string(),
                     };
-                    ui.label(RichText::new(time_text).monospace().size(13.0).color(theme::TEXT_DIM));
-                    let bar_w = (ui.available_width() - 230.0).max(120.0);
-                    let (rect, resp) = ui.allocate_exact_size(vec2(bar_w, 5.0), Sense::click_and_drag());
+                    ui.label(RichText::new(time_text).monospace().size(12.5).color(theme::TEXT_DIM));
+                    let bar_w = (ui.available_width() - 210.0).max(120.0);
+                    let (rect, resp) = ui.allocate_exact_size(vec2(bar_w, 6.0), Sense::click_and_drag());
                     ui.painter().rect_filled(rect, 3.0, theme::BORDER);
                     let frac = match progress {
                         Some((pos, total)) if total > 0.0 => (pos / total).clamp(0.0, 1.0) as f32,
                         _ => 0.0,
                     };
-                    let filled = egui::Rect::from_min_size(rect.min, vec2(bar_w * frac, 5.0));
+                    let filled = egui::Rect::from_min_size(rect.min, vec2(bar_w * frac, 6.0));
                     ui.painter().rect_filled(filled, 3.0, theme::ACCENT);
                     if progress.is_some() && (resp.clicked() || resp.dragged()) {
                         if let Some(pos) = resp.interact_pointer_pos() {
@@ -1466,8 +1503,8 @@ impl VibeDropApp {
                         }
                     }
                     let (icon_rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                    theme::paint_icon(ui.painter(), Icon::Volume, icon_rect.center(), 18.0, theme::TEXT_DIM);
-                    ui.spacing_mut().slider_width = 130.0;
+                    theme::paint_icon(ui.painter(), Icon::Headphones, icon_rect.center(), 18.0, theme::ACCENT);
+                    ui.spacing_mut().slider_width = 120.0;
                     levels_changed |=
                         volume_row_inline(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
                 });
@@ -1491,7 +1528,7 @@ impl VibeDropApp {
             }
         }
     }
-
+    /// The bottom status strip: what is selected, counters and the quick actions.
     fn draw_bottombar(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
         let mic_state = self.engine.route_state(OutputRole::Secondary);
@@ -1499,23 +1536,25 @@ impl VibeDropApp {
         let mut stop_all = false;
         let mut mic_click = false;
         egui::TopBottomPanel::bottom("infobar")
+            .exact_height(44.0)
             .frame(
                 egui::Frame::none()
                     .fill(theme::SIDEBAR)
                     .stroke(Stroke::new(1.0_f32, theme::BORDER))
-                    .inner_margin(egui::Margin::symmetric(14.0, 8.0)),
+                    .inner_margin(egui::Margin::symmetric(12.0, 7.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let (icon_rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                    theme::paint_icon(ui.painter(), Icon::Library, icon_rect.center(), 18.0, theme::ACCENT);
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    let (icon_rect, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
+                    theme::paint_icon(ui.painter(), Icon::Home, icon_rect.center(), 22.0, theme::ACCENT);
                     ui.label(
                         RichText::new(lang::t(&lang, self.page.title()))
-                            .size(13.5)
+                            .size(14.0)
                             .strong()
                             .color(theme::TEXT),
                     );
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
                     ui.label(
                         RichText::new(format!("{}: {}", lang::t(&lang, "Sounds"), self.library.len()))
                             .size(12.5)
@@ -1526,15 +1565,15 @@ impl VibeDropApp {
                             .size(12.5)
                             .color(theme::TEXT_DIM),
                     );
+                    if self.discord.status() == crate::discord::DiscordStatus::Connected {
+                        ui.label(RichText::new("Discord").size(12.5).color(theme::ACCENT));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if theme::danger_button(ui, lang::t(&lang, "Stop All")).clicked() {
-                            stop_all = true;
-                        }
-                        if theme::icon_button(ui, Icon::Settings, 17.0, false)
-                            .on_hover_text(lang::t(&lang, "Settings"))
-                            .clicked()
-                        {
+                        if theme::toolbar_button(ui, Icon::Wrench, lang::t(&lang, "Settings")).clicked() {
                             open_settings = true;
+                        }
+                        if theme::toolbar_button(ui, Icon::StopAll, lang::t(&lang, "Stop All")).clicked() {
+                            stop_all = true;
                         }
                         let (text, color, filled, tip) = if !self.settings.secondary_enabled {
                             (
@@ -2074,6 +2113,33 @@ impl VibeDropApp {
             Action::Relink(id) => self.relink_sound(&id),
             Action::ExtractAudio(id) => self.extract_audio(&id),
         }
+    }
+
+    // ---- Presence: Discord Rich Presence --------------------------------------------------------
+
+    /// Push the current playback state to Discord (cheap, runs every frame).
+    fn sync_presence(&mut self) {
+        let now_name = self
+            .now_playing
+            .as_deref()
+            .and_then(|id| self.library.get(id))
+            .map(|e| e.name.clone());
+        let playing = self.now_playing.as_deref().is_some_and(|id| self.engine.is_playing(id));
+        let progress = self.now_playing.as_deref().and_then(|id| self.engine.progress(id));
+        let (details, state, started) = match (&now_name, playing, progress) {
+            (Some(name), true, Some((pos, total))) => {
+                let state = if total > 0.0 {
+                    format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total))
+                } else {
+                    theme::fmt_time(pos)
+                };
+                let started = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                (Some(name.clone()), Some(state), Some(started))
+            }
+            (Some(name), _, _) => (Some(name.clone()), None, None),
+            (None, _, _) => (None, None, None),
+        };
+        self.discord.set(details, state, started);
     }
 
     // ---- Drawing: history --------------------------------------------------------------------
@@ -3578,6 +3644,7 @@ impl eframe::App for VibeDropApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_events(ctx);
         self.handle_close(ctx);
+        self.sync_presence();
 
         self.draw_menubar(ctx);
         self.draw_transport(ctx);

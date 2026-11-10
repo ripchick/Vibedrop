@@ -8,9 +8,8 @@
 Free, open-source soundboard for voice chats, in the spirit of Soundpad: a sound library with
 global hotkeys, downloads via `soundpad://` links and a dual output — your headphones hear the
 sound, and the voice chat hears it through a second "microphone route". A desktop-first
-Windows-style interface (Fluent look, Segoe UI, Soundpad-style layout — sidebar, sound
-table and player bar) — no audio driver bundled or required, Windows, Linux and macOS
-support.
+soundboard interface — compact menu bar, transport strip, category sidebar, sound table and a
+status bar — no audio driver bundled or required, Windows, Linux and macOS support.
 
 [Русский перевод](README.ru.md)
 
@@ -67,8 +66,13 @@ support.
   action, pause/cancel, part-file cleanup, files never executed.
 - Interface in **Russian or English** (switch in Settings → Application; the whole UI is one
   language at a time, including error messages from the core modules).
-- Settings organized into cards, dark Fluent look (Segoe UI, Windows-style) with a sidebar,
-  sound table and player bar, toasts instead of panics, keyboard-friendly focus handling.
+- Settings organized into cards, classic soundboard look (grey surfaces, blue accents,
+  compact menu bar, seekable progress bar), toasts instead of panics, keyboard-friendly focus
+  handling.
+- Discord Rich Presence: the status shows **VibeDrop** while the app is open, and, while a
+  sound plays, what you are listening to with the elapsed time (like Spotify).
+  To show the app icon next to it, upload `assets/icon.png` in the Discord Developer Portal
+  under *Rich Presence → Art Assets* with the name `logo`.
 - Virtual output helper: download the free VB-CABLE (Windows) from the official site,
   or create a built-in virtual sink on Linux — no driver ships inside VibeDrop.
 

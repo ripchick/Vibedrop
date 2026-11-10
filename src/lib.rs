@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod audio;
+pub mod discord;
 pub mod downloader;
 pub mod errors;
 pub mod fsutil;
