@@ -189,3 +189,9 @@ not affiliated with or endorsed by that owner. VB-CABLE is a freeware product of
 it is not included in this repository and VB-Audio is not affiliated with this project.
 All other trademarks (Discord, PipeWire, PulseAudio, Linux, Windows) belong to their
 respective owners.
+
+## Contributors
+
+Thanks to everyone who helps VibeDrop — see [`.github/CONTRIBUTORS.md`](.github/CONTRIBUTORS.md):
+
+- [@kolokolbobo-ship-it](https://github.com/kolokolbobo-ship-it)

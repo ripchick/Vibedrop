@@ -204,3 +204,10 @@ VibeDrop — независимый проект с открытым исход�
 бесплатная программа VB-Audio; она не входит в этот репозиторий, и VB-Audio не
 аффилирована с данным проектом. Все прочие товарные знаки (Discord, PipeWire,
 PulseAudio, Linux, Windows) принадлежат их правообладателям.
+
+## Участники
+
+Спасибо всем, кто помогает VibeDrop — полный список в
+[`.github/CONTRIBUTORS.md`](.github/CONTRIBUTORS.md):
+
+- [@kolokolbobo-ship-it](https://github.com/kolokolbobo-ship-it)
