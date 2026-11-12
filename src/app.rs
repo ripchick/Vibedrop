@@ -599,6 +599,31 @@ impl VibeDropApp {
         Ok(())
     }
 
+    /// Open an https link in the user's default browser.
+    ///
+    /// `ctx.open_url` depends on the `webbrowser` feature and silently does nothing when the
+    /// desktop refuses it; the platform command is the same one the data-folder button uses and
+    /// works on every supported desktop.
+    fn open_external_url(url: &str) {
+        #[cfg(target_os = "windows")]
+        let spawned = std::process::Command::new("explorer").arg(url).spawn();
+        #[cfg(target_os = "linux")]
+        let spawned = std::process::Command::new("xdg-open").arg(url).spawn();
+        #[cfg(target_os = "macos")]
+        let spawned = std::process::Command::new("open").arg(url).spawn();
+        #[cfg(target_os = "android")]
+        let spawned: Result<std::process::Child, std::io::Error> = {
+            let _ = url;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "opening links is not available on Android",
+            ))
+        };
+        if let Err(e) = spawned {
+            tracing::warn!("could not open {url} in a browser: {e}");
+        }
+    }
+
     /// Open the data folder in the file manager.
     fn open_data_folder(&self) {
         #[cfg(target_os = "windows")]
@@ -3118,6 +3143,9 @@ impl VibeDropApp {
             self.route_test = None;
             self.route_test_running = true;
             self.engine.test_route();
+        }
+        if want_cable_page {
+            Self::open_external_url(crate::cable::VB_CABLE_PAGE);
         }
         if want_sink {
             let output = std::process::Command::new("pactl")
