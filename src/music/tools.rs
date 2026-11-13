@@ -106,15 +106,22 @@ fn is_program(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    #[cfg(windows)]
-    {
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        matches!(ext.to_ascii_lowercase().as_str(), "exe" | "cmd" | "bat" | "com" | "ps1")
-    }
-    #[cfg(not(windows))]
-    {
-        true
-    }
+    is_program_file(path)
+}
+
+/// Whether an existing file may be executed.
+///
+/// On Windows only known executable extensions are accepted; on Unix-like systems every file
+/// with an executable bit is a program, so the name itself does not matter.
+#[cfg(windows)]
+fn is_program_file(path: &Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    matches!(ext.to_ascii_lowercase().as_str(), "exe" | "cmd" | "bat" | "com" | "ps1")
+}
+
+#[cfg(not(windows))]
+fn is_program_file(_path: &Path) -> bool {
+    true
 }
 
 fn in_dir(dir: &Path, names: &[&str]) -> Option<PathBuf> {
