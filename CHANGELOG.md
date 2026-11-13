@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## 0.13.2
+
+### Added
+- **Spotify playlists** in the Music section: a `open.spotify.com/playlist/...` link is imported as
+  one collection with its cover, title, owner, tracks, queue and repeat modes. Storage keeps the
+  collection kind, so playlists are labelled as playlists after a restart. The Web API path reads
+  every page (up to 50 pages); the public page path works without keys. Local files and podcast
+  episodes inside a playlist are skipped.
+
+### Changed
+- Settings: every numeric setting now uses the same hand-painted 100 px slider as the volume
+  controls: corner radius, font size, start offset, simultaneous sounds and a sound's own volume
+  in its "•••" menu. Their labels are localised too (the old ones always said "Corner radius",
+  "Font size", ... in English).
+- Settings: the volume sliders in the "Volume and playback" card now use the same 100 px painted
+  rail and percentage as the master slider in the header (they were 180 px `egui::Slider`s).
+- Settings: the accent colour field shows its `#RRGGBB` value by default and clearing it restores
+  the colour that is currently in use, so the value can no longer be erased.
+- Music: an album or playlist is selected by clicking anywhere on its card (cover, title, meta or
+  empty space); the play button stays a separate action. Card titles/metadata no longer swallow
+  that click as selectable text.
+- Music: album rows now have the same 38 px height, 30 px cover and 30 px play button as the track
+  rows, and the play button reserves its own space, so a long title is truncated instead of being
+  drawn underneath the button.
+
+### Removed
+- The "Restore to My Sounds" button and all the code behind it (`restore_sound`,
+  `find_sound_by_name`, the `path`/`url` fields of the history entry). A removed sound no longer
+  offers to come back from the History page.
+
 ## 0.13.1
 
 ### Added

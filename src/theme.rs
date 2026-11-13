@@ -165,6 +165,23 @@ pub fn c_warning() -> Color32 {
     palette().warning
 }
 
+/// `#RRGGBB` text for a colour.
+pub fn hex_color(color: Color32) -> String {
+    format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b())
+}
+
+/// Accent of a theme variant when the user has not picked a custom colour.
+///
+/// The accent field in Settings shows this value by default, so the user always sees the exact
+/// hex code that is in use instead of an empty box with a hint.
+pub fn default_accent(variant: &str) -> Color32 {
+    match variant {
+        "midnight" => MIDNIGHT.accent,
+        "light" => LIGHT.accent,
+        _ => DARK.accent,
+    }
+}
+
 /// Parse a `#RRGGBB` colour string.
 pub fn parse_color(text: &str) -> Option<Color32> {
     let t = text.trim();
@@ -454,12 +471,13 @@ pub fn chip(ui: &mut Ui, text: &str, color: Color32, filled: bool) -> Response {
     .on_hover_cursor(CursorIcon::PointingHand)
 }
 
-/// Compact volume slider that is painted by hand.
+/// Compact slider painted by hand.
 ///
 /// egui's own slider draws the handle as a circle that reaches past the right edge of the
 /// widget, so at 100 % the handle sat on top of the percentage next to it. This widget keeps
 /// the handle inside its own rectangle and paints the track the way the rest of the app does.
-pub fn volume_slider(ui: &mut Ui, value: &mut f32, enabled: bool) -> Response {
+/// It is used for every setting that is a number (volume, corner radius, font size, ...).
+pub fn range_slider(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, enabled: bool) -> Response {
     let width = ui.spacing_mut().slider_width.max(40.0);
     let height = 18.0;
     let sense = if enabled {
@@ -468,18 +486,22 @@ pub fn volume_slider(ui: &mut Ui, value: &mut f32, enabled: bool) -> Response {
         Sense::hover()
     };
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), sense);
+    let min = *range.start();
+    let max = *range.end();
+    let span = (max - min).max(f32::EPSILON);
 
     if enabled && (response.clicked() || response.dragged()) {
         if let Some(pos) = response.interact_pointer_pos() {
             let frac = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            if (frac - *value).abs() > f32::EPSILON {
-                *value = frac;
+            let new_value = min + frac * span;
+            if (new_value - *value).abs() > f32::EPSILON {
+                *value = new_value;
                 response.mark_changed();
             }
         }
     }
 
-    let frac = value.clamp(0.0, 1.0);
+    let frac = ((*value - min) / span).clamp(0.0, 1.0);
     let rail = Rect::from_center_size(rect.center(), vec2(rect.width(), 6.0));
     ui.painter().rect_filled(rail, 3.0, c_border());
     let filled = Rect::from_min_size(rail.min, vec2(rail.width() * frac, rail.height()));
@@ -497,6 +519,11 @@ pub fn volume_slider(ui: &mut Ui, value: &mut f32, enabled: bool) -> Response {
         Stroke::new(1.4_f32, if response.hovered() { c_accent() } else { c_text_dim() }),
     );
     response
+}
+
+/// Volume slider (0..=1) with the same look as every other setting slider.
+pub fn volume_slider(ui: &mut Ui, value: &mut f32, enabled: bool) -> Response {
+    range_slider(ui, value, 0.0..=1.0, enabled)
 }
 
 // ---- Icons -----------------------------------------------------------------------------------

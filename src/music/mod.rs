@@ -17,7 +17,7 @@ pub mod player;
 pub mod spotify;
 pub mod tools;
 
-pub use library::{MusicAlbum, MusicLibrary, MusicTrack, TrackStatus};
+pub use library::{CollectionKind, MusicAlbum, MusicLibrary, MusicTrack, TrackStatus};
 pub use player::{MusicPlayer, PlaybackState, RepeatMode};
 pub use spotify::{FetchedEntity, SpotifyKind, SpotifyLink};
 pub use tools::Tools;

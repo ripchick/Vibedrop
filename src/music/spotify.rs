@@ -1,11 +1,11 @@
 //! Spotify metadata without the desktop app.
 //!
-//! Two ways to read a track or an album:
+//! Two ways to read a track, an album or a playlist:
 //! * **Spotify Web API** (Client Credentials flow) when a Client ID and Secret are configured.
 //!   This is the stable, documented route and it also returns the album of a single track.
 //! * **The public embed page** (`open.spotify.com/embed/...`) otherwise. It contains a
-//!   `__NEXT_DATA__` JSON blob with the title, artist, cover, duration and the full track list,
-//!   so the Music section works without any account or key. No user login is involved either way.
+//!   `__NEXT_DATA__` JSON blob with the title, artist, cover, duration and the track list, so the
+//!   Music section works without any account or key. No user login is involved either way.
 //!
 //! Only `open.spotify.com` links are accepted. Nothing from the page is trusted as HTML: the JSON
 //! is parsed with serde and every field is range-checked by the caller.
@@ -27,6 +27,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(25);
 pub enum SpotifyKind {
     Track,
     Album,
+    Playlist,
 }
 
 impl SpotifyKind {
@@ -34,6 +35,7 @@ impl SpotifyKind {
         match self {
             SpotifyKind::Track => "track",
             SpotifyKind::Album => "album",
+            SpotifyKind::Playlist => "playlist",
         }
     }
 }
@@ -103,11 +105,12 @@ pub fn resolve_credentials(client_id: &str, client_secret: &str) -> Option<Crede
     }
 }
 
-/// Parse a Spotify track/album link: a full URL, a URL without a scheme, or a `spotify:` URI.
+/// Parse a Spotify track/album/playlist link: a full URL, a URL without a scheme, or a
+/// `spotify:` URI.
 pub fn parse_link(input: &str) -> Result<SpotifyLink, String> {
     let text = input.trim();
     if text.is_empty() {
-        return Err("Paste a Spotify track or album link first.".to_string());
+        return Err("Paste a Spotify track, album or playlist link first.".to_string());
     }
     if let Some(rest) = text.strip_prefix("spotify:") {
         let parts: Vec<&str> = rest.split(':').collect();
@@ -115,15 +118,16 @@ pub fn parse_link(input: &str) -> Result<SpotifyLink, String> {
             let kind = match parts[0] {
                 "track" => SpotifyKind::Track,
                 "album" => SpotifyKind::Album,
+                "playlist" => SpotifyKind::Playlist,
                 other => {
                     return Err(format!(
-                        "\"{other}\" links are not supported. Use a track or an album link."
+                        "\"{other}\" links are not supported. Use a track, album or playlist link."
                     ))
                 }
             };
             return checked(kind, parts[1]);
         }
-        return Err("This Spotify link does not contain a track or album id.".to_string());
+        return Err("This Spotify link does not contain a track, album or playlist id.".to_string());
     }
 
     let url = if text.contains("://") {
@@ -142,18 +146,19 @@ pub fn parse_link(input: &str) -> Result<SpotifyLink, String> {
         .path_segments()
         .map(|s| s.filter(|p| !p.is_empty()).collect())
         .unwrap_or_default();
-    // Accepted: /track/<id>, /album/<id>, /embed/track/<id>, /intl-ru/track/<id>.
+    // Accepted: /track/<id>, /album/<id>, /playlist/<id>, /embed/track/<id>, /intl-ru/album/<id>.
     let start = segments
         .iter()
-        .position(|s| *s == "track" || *s == "album")
-        .ok_or_else(|| "Use a link that contains /track/ or /album/.".to_string())?;
+        .position(|s| *s == "track" || *s == "album" || *s == "playlist")
+        .ok_or_else(|| "Use a link that contains /track/, /album/ or /playlist/.".to_string())?;
     let kind = match segments[start] {
         "track" => SpotifyKind::Track,
+        "playlist" => SpotifyKind::Playlist,
         _ => SpotifyKind::Album,
     };
     let id = *segments
         .get(start + 1)
-        .ok_or_else(|| "This Spotify link does not contain a track or album id.".to_string())?;
+        .ok_or_else(|| "This Spotify link does not contain a track, album or playlist id.".to_string())?;
     checked(kind, id)
 }
 
@@ -206,6 +211,7 @@ fn fetch_api(link: &SpotifyLink, credentials: &Credentials) -> Result<FetchedEnt
     match link.kind {
         SpotifyKind::Album => api_album(&client, &token, link),
         SpotifyKind::Track => api_track(&client, &token, link),
+        SpotifyKind::Playlist => api_playlist(&client, &token, link),
     }
 }
 
@@ -247,7 +253,7 @@ fn api_get(client: &Client, token: &str, url: &str) -> Result<Value, String> {
         return Err(match status.as_u16() {
             401 => "Spotify rejected the access token.".to_string(),
             403 => "Spotify refused this request (the app may not have Web API access).".to_string(),
-            404 => "Spotify could not find this track or album.".to_string(),
+            404 => "Spotify could not find this track, album or playlist.".to_string(),
             429 => "Spotify is rate-limiting requests. Try again in a minute.".to_string(),
             code => format!("Spotify answered with HTTP {code}."),
         });
@@ -301,6 +307,92 @@ fn api_album(client: &Client, token: &str, link: &SpotifyLink) -> Result<Fetched
         cover_url,
         tracks,
         source: "Spotify Web API",
+    })
+}
+
+fn api_playlist(client: &Client, token: &str, link: &SpotifyLink) -> Result<FetchedEntity, String> {
+    let mut page = api_get(client, token, &format!("{API}/playlists/{}", link.id))?;
+    let title = page
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Untitled playlist")
+        .to_string();
+    let artist = page
+        .get("owner")
+        .and_then(|o| o.get("display_name"))
+        .and_then(Value::as_str)
+        .map(|s| decode_entities(s.trim()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Spotify".to_string());
+    let cover_url = largest_image(&page);
+    let mut tracks = Vec::new();
+
+    // The first response has the paging object under "tracks"; the next-page responses are the
+    // paging object itself. 50 pages cover a 5000-track playlist, far above Spotify's limit of
+    // 10000 but well below anything that would make the import look hung.
+    for _ in 0..50 {
+        let container = page.get("tracks").unwrap_or(&page);
+        if let Some(items) = container.get("items").and_then(Value::as_array) {
+            for item in items {
+                let Some(track) = api_playlist_item(item) else {
+                    continue;
+                };
+                tracks.push(track);
+            }
+        }
+        let next = container.get("next").and_then(Value::as_str);
+        let Some(next) = next else { break };
+        // Never send the bearer token to a host other than Spotify's API.
+        if !next.starts_with("https://api.spotify.com/") {
+            tracing::warn!("Spotify returned an unexpected pagination URL; stopping at this page");
+            break;
+        }
+        page = api_get(client, token, next)?;
+    }
+    if tracks.is_empty() {
+        return Err("Spotify returned no playable tracks for this playlist.".to_string());
+    }
+    Ok(FetchedEntity {
+        kind: SpotifyKind::Playlist,
+        title,
+        artist,
+        cover_url,
+        tracks,
+        source: "Spotify Web API",
+    })
+}
+
+/// One entry of `GET /playlists/{id}/tracks`: the real track is nested under `track`.
+fn api_playlist_item(item: &Value) -> Option<FetchedTrack> {
+    let track = item.get("track")?;
+    if track.is_null()
+        || track.get("type").and_then(Value::as_str) == Some("episode")
+        || item.get("is_local").and_then(Value::as_bool) == Some(true)
+    {
+        return None;
+    }
+    let title = track.get("name").and_then(Value::as_str)?.trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let artist = first_artist(track).unwrap_or_default();
+    let album = track
+        .get("album")
+        .and_then(|a| a.get("name"))
+        .and_then(Value::as_str)
+        .map(|s| decode_entities(s.trim()))
+        .unwrap_or_default();
+    let duration_secs = track.get("duration_ms").and_then(millis).unwrap_or(0.0);
+    Some(FetchedTrack {
+        spotify_id: track
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
+        title,
+        artist,
+        album,
+        duration_secs,
     })
 }
 
@@ -399,7 +491,7 @@ fn fetch_public(link: &SpotifyLink) -> Result<FetchedEntity, String> {
         .send()
         .map_err(|e| network_error("Could not reach Spotify", e))?;
     if response.status().as_u16() == 404 {
-        return Err("Spotify could not find this track or album.".to_string());
+        return Err("Spotify could not find this track, album or playlist.".to_string());
     }
     if !response.status().is_success() {
         return Err(format!(
@@ -411,13 +503,13 @@ fn fetch_public(link: &SpotifyLink) -> Result<FetchedEntity, String> {
         .text()
         .map_err(|e| format!("Could not read the Spotify page: {e}"))?;
     let data = extract_next_data(&html).ok_or_else(|| {
-        "Spotify did not return album data. The public page layout may have changed; add Spotify \
+        "Spotify did not return metadata. The public page layout may have changed; add Spotify \
          Client ID/Secret in Settings > Music to use the Web API."
             .to_string()
     })?;
-    let value: Value = serde_json::from_str(data).map_err(|e| format!("Spotify sent unreadable album data: {e}"))?;
+    let value: Value = serde_json::from_str(data).map_err(|e| format!("Spotify sent unreadable metadata: {e}"))?;
     let entity = find_entity(&value).ok_or_else(|| {
-        "The Spotify page did not contain a track or album. Is this a playlist or podcast link?".to_string()
+        "The Spotify page did not contain a track, album or playlist. Is this a podcast link?".to_string()
     })?;
     parse_embed_entity(entity, link.kind)
 }
@@ -478,6 +570,7 @@ fn parse_embed_entity(entity: &Value, kind: SpotifyKind) -> Result<FetchedEntity
         .unwrap_or_else(|| match kind {
             SpotifyKind::Album => "Untitled album".to_string(),
             SpotifyKind::Track => "Untitled track".to_string(),
+            SpotifyKind::Playlist => "Untitled playlist".to_string(),
         });
     let artist = entity
         .get("subtitle")
@@ -497,7 +590,18 @@ fn parse_embed_entity(entity: &Value, kind: SpotifyKind) -> Result<FetchedEntity
         })
         .and_then(|i| i.get("url"))
         .and_then(Value::as_str)
-        .map(str::to_string);
+        .map(str::to_string)
+        // A playlist's embed page keeps the cover under `coverArt.sources` instead.
+        .or_else(|| {
+            entity
+                .get("coverArt")
+                .and_then(|v| v.get("sources"))
+                .and_then(Value::as_array)
+                .and_then(|images| images.first())
+                .and_then(|i| i.get("url"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
 
     match kind {
         SpotifyKind::Track => {
@@ -527,14 +631,18 @@ fn parse_embed_entity(entity: &Value, kind: SpotifyKind) -> Result<FetchedEntity
                 source: "Spotify public page",
             })
         }
-        SpotifyKind::Album => {
+        SpotifyKind::Album | SpotifyKind::Playlist => {
             let items = entity
                 .get("trackList")
                 .and_then(Value::as_array)
-                .ok_or_else(|| "Spotify returned no track list for this album.".to_string())?;
+                .ok_or_else(|| format!("Spotify returned no track list for this {}.", kind.as_str()))?;
             let album_title = entity_title(entity);
             let mut tracks = Vec::with_capacity(items.len());
             for item in items {
+                // A playlist can contain podcast episodes; those cannot be downloaded as music.
+                if item.get("entityType").and_then(Value::as_str) == Some("episode") {
+                    continue;
+                }
                 let title = item
                     .get("title")
                     .and_then(Value::as_str)
@@ -563,7 +671,10 @@ fn parse_embed_entity(entity: &Value, kind: SpotifyKind) -> Result<FetchedEntity
                 });
             }
             if tracks.is_empty() {
-                return Err("Spotify returned no playable tracks for this album.".to_string());
+                return Err(format!(
+                    "Spotify returned no playable tracks for this {}.",
+                    kind.as_str()
+                ));
             }
             Ok(FetchedEntity {
                 kind,
@@ -733,12 +844,20 @@ mod tests {
 
         let uri = parse_link("spotify:track:4cOdK2wGLETKBW3PvgPWqT").unwrap();
         assert_eq!(uri.kind, SpotifyKind::Track);
+
+        let playlist = parse_link("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x").unwrap();
+        assert_eq!(playlist.kind, SpotifyKind::Playlist);
+        assert_eq!(playlist.id, "37i9dQZF1DXcBWIGoYBM5M");
+
+        let playlist_uri = parse_link("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M").unwrap();
+        assert_eq!(playlist_uri.kind, SpotifyKind::Playlist);
     }
 
     #[test]
     fn rejects_other_hosts_and_entities() {
         assert!(parse_link("https://example.com/album/0ETFjACtuP2ADo6LFhL6HN").is_err());
-        assert!(parse_link("https://open.spotify.com/playlist/0ETFjACtuP2ADo6LFhL6HN").is_err());
+        assert!(parse_link("https://open.spotify.com/episode/0ETFjACtuP2ADo6LFhL6HN").is_err());
+        assert!(parse_link("https://open.spotify.com/artist/0ETFjACtuP2ADo6LFhL6HN").is_err());
         assert!(parse_link("https://open.spotify.com/album/../../etc/passwd").is_err());
         assert!(parse_link("").is_err());
     }
@@ -778,6 +897,48 @@ mod tests {
         assert_eq!(parsed.tracks[0].title, "Come Together");
         assert!((parsed.tracks[0].duration_secs - 259.946).abs() < 0.01);
         assert_eq!(parsed.tracks[0].spotify_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn parses_playlist_embed_json() {
+        let entity = serde_json::json!({
+            "type": "playlist",
+            "title": "Today's Top Hits",
+            "subtitle": "Spotify",
+            "trackList": [
+                {"uri":"spotify:track:p1","title":"Song One","subtitle":"Artist A","duration":200000,"entityType":"track"},
+                {"uri":"spotify:episode:e1","title":"Podcast episode","subtitle":"Show","duration":1800000,"entityType":"episode"},
+                {"uri":"spotify:track:p2","title":"Song Two","subtitle":"Artist B","duration":180000,"entityType":"track"}
+            ],
+            "coverArt": {"sources": [{"url":"https://img/playlist"}]}
+        });
+        let parsed = parse_embed_entity(&entity, SpotifyKind::Playlist).unwrap();
+        assert_eq!(parsed.kind, SpotifyKind::Playlist);
+        assert_eq!(parsed.title, "Today's Top Hits");
+        assert_eq!(parsed.artist, "Spotify");
+        assert_eq!(parsed.cover_url.as_deref(), Some("https://img/playlist"));
+        assert_eq!(parsed.tracks.len(), 2);
+        assert_eq!(parsed.tracks[0].title, "Song One");
+        assert_eq!(parsed.tracks[1].spotify_id.as_deref(), Some("p2"));
+    }
+
+    #[test]
+    fn parses_playlist_api_items_and_skips_empty_entries() {
+        let item = serde_json::json!({
+            "track": {
+                "id": "t1",
+                "name": "Song",
+                "duration_ms": 123000,
+                "artists": [{"name": "Artist"}],
+                "album": {"name": "Album"}
+            }
+        });
+        let parsed = api_playlist_item(&item).unwrap();
+        assert_eq!(parsed.title, "Song");
+        assert_eq!(parsed.album, "Album");
+        assert!((parsed.duration_secs - 123.0).abs() < 0.01);
+        assert!(api_playlist_item(&serde_json::json!({"track": null})).is_none());
+        assert!(api_playlist_item(&serde_json::json!({"is_local": true, "track": {"name": "x"}})).is_none());
     }
 
     #[test]

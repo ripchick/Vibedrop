@@ -62,7 +62,6 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Clear data" => "Очистить данные",
         "Delete everything" => "Удалить всё",
         "Type DELETE to confirm" => "Введите DELETE для подтверждения",
-        "Restore to My Sounds" => "Вернуть в мои звуки",
         "Blue" => "Синий",
         "Teal" => "Бирюзовый",
         "Amber" => "Янтарный",
@@ -266,14 +265,14 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         // Music section.
         "Music" => "Музыка",
         "Music settings" => "Настройки музыки",
-        "Import album" => "Импортировать альбом",
+        "Add to Music" => "Добавить в музыку",
         "Importing..." => "Импорт...",
         "Clear cache" => "Очистить кэш",
-        "Paste a Spotify track or album link, e.g. https://open.spotify.com/album/..." => {
-            "Вставьте ссылку Spotify на трек или альбом, например https://open.spotify.com/album/..."
+        "Paste a Spotify track, album or playlist link, e.g. https://open.spotify.com/playlist/..." => {
+            "Вставьте ссылку Spotify на трек, альбом или плейлист, например https://open.spotify.com/playlist/..."
         }
-        "Albums are grouped by release; all tracks are downloaded in the background through SoundCloud, then YouTube if needed." => {
-            "Альбомы группируются по релизу; все треки скачиваются в фоне через SoundCloud, при необходимости — через YouTube."
+        "Albums and playlists are grouped; all tracks are downloaded in the background through SoundCloud, then YouTube if needed." => {
+            "Альбомы и плейлисты группируются; все треки скачиваются в фоне через SoundCloud, при необходимости — через YouTube."
         }
         "Download tools are missing" => "Не хватает программ для скачивания",
         "Not playing" => "Не играет",
@@ -290,13 +289,14 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Previous track" => "Предыдущий трек",
         "Stop the music" => "Остановить музыку",
         "No music yet" => "Музыки пока нет",
-        "Paste a Spotify track or album link above; the tracks are downloaded into the music cache and appear here." => {
-            "Вставьте выше ссылку Spotify на трек или альбом; треки скачаются в музыкальный кэш и появятся здесь."
+        "Paste a Spotify track, album or playlist link above; the tracks are downloaded into the music cache and appear here." => {
+            "Вставьте выше ссылку Spotify на трек, альбом или плейлист; треки скачаются в музыкальный кэш и появятся здесь."
         }
-        "ALBUMS" => "АЛЬБОМЫ",
-        "Select an album" => "Выберите альбом",
+        "ALBUMS & PLAYLISTS" => "АЛЬБОМЫ И ПЛЕЙЛИСТЫ",
+        "Select an album or playlist" => "Выберите альбом или плейлист",
         "Remove album" => "Удалить альбом",
-        "Removes the album and its cached audio from VibeDrop." => "Удаляет альбом и его аудиокэш из VibeDrop.",
+        "Remove playlist" => "Удалить плейлист",
+        "Removes it and its cached audio from VibeDrop." => "Удаляет выбранное и его аудиокэш из VibeDrop.",
         "Download missing" => "Докачать недостающие",
         "Play all" => "Играть всё",
         "Ready" => "Готово",
@@ -320,8 +320,8 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Optional; empty = public page" => "Необязательно; пусто = публичная страница",
         "Optional; stored locally" => "Необязательно; хранится локально",
         "Tools were not checked yet." => "Программы ещё не проверены.",
-        "The Music section imports Spotify tracks and albums and downloads their audio with yt-dlp. Leave the paths empty to find both programs on PATH; set them when a portable copy is used." => {
-            "Раздел «Музыка» импортирует треки и альбомы Spotify и скачивает их аудио через yt-dlp. Оставьте пути пустыми, чтобы искать программы в PATH; укажите их, если используете переносную копию."
+        "The Music section imports Spotify tracks, albums and playlists and downloads their audio with yt-dlp. Leave the paths empty to find both programs on PATH; set them when a portable copy is used." => {
+            "Раздел «Музыка» импортирует треки, альбомы и плейлисты Spotify и скачивает их аудио через yt-dlp. Оставьте пути пустыми, чтобы искать программы в PATH; укажите их, если используете переносную копию."
         }
         "Environment variables SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are used when the fields are empty. A Client Credentials secret only reads the public catalogue; it is stored in settings.json on this PC." => {
             "Если поля пусты, используются переменные среды SPOTIFY_CLIENT_ID и SPOTIFY_CLIENT_SECRET. Секрет Client Credentials даёт доступ только на чтение публичного каталога; он хранится в settings.json на этом компьютере."

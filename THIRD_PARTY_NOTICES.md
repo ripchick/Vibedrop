@@ -33,7 +33,7 @@ from the projects named above (the exact build URLs are listed in `tools/license
   *not* part of VibeDrop; the program only opens the official page so the user can download it.
 * **Discord** — the Rich Presence integration talks to the local Discord client over its own
   IPC. Discord is a trademark of its respective owner.
-* **Spotify** — the Music section reads the public metadata of a track or album. Spotify is a
+* **Spotify** — the Music section reads the public metadata of a track, album or playlist. Spotify is a
   trademark of Spotify AB. No Spotify account is needed and nothing is bypassed.
 * **Soundpad** — VibeDrop is not the original Soundpad program. Soundpad is a trademark of its
   respective owner; this project is not affiliated with or endorsed by that owner.

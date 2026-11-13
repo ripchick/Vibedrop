@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! cargo run --example music_probe -- https://open.spotify.com/album/0ETFjACtuP2ADo6LFhL6HN
+//! cargo run --example music_probe -- https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
 //! ```
 //!
 //! `yt-dlp` is looked up on PATH unless `YTDLP_PATH` is set; `ffmpeg` on PATH unless
@@ -19,7 +20,7 @@ use vibedrop::music::MusicTrack;
 fn main() -> Result<(), String> {
     let url = std::env::args()
         .nth(1)
-        .ok_or_else(|| "usage: music_probe <spotify track/album URL>".to_string())?;
+        .ok_or_else(|| "usage: music_probe <spotify track/album/playlist URL>".to_string())?;
     let link = spotify::parse_link(&url)?;
     println!("link: {:?} {}", link.kind, link.id);
     let entity = spotify::fetch(&link, None)?;

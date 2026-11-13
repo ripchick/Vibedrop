@@ -154,6 +154,23 @@ impl MusicTrack {
     }
 }
 
+/// What an imported collection came from. The player treats every collection as a queue; the
+/// kind is only used by the UI (labels, buttons) and survives restarts in `music.json`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectionKind {
+    #[default]
+    Album,
+    Playlist,
+    Track,
+}
+
+impl CollectionKind {
+    pub fn is_playlist(self) -> bool {
+        matches!(self, CollectionKind::Playlist)
+    }
+}
+
 /// An imported album (or a single track, which is stored as a one-track album).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct MusicAlbum {
@@ -170,6 +187,9 @@ pub struct MusicAlbum {
     pub source_url: String,
     #[serde(default)]
     pub added_at: u64,
+    /// Album, playlist or a single track. Old `music.json` files have no field and load as albums.
+    #[serde(default)]
+    pub kind: CollectionKind,
     #[serde(default)]
     pub tracks: Vec<MusicTrack>,
 }
@@ -413,6 +433,7 @@ mod tests {
             cover_url: None,
             source_url: "https://open.spotify.com/album/sp-1".to_string(),
             added_at: 1,
+            kind: CollectionKind::Album,
             tracks: Vec::new(),
         };
         a.tracks
@@ -491,6 +512,18 @@ mod tests {
         assert!(!file.exists());
         assert_eq!(lib.albums[0].tracks[0].status, TrackStatus::Queued);
         assert_eq!(lib.cache_bytes(), 0);
+    }
+
+    #[test]
+    fn older_music_json_without_kind_loads_as_album() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("music.json");
+        let mut value = serde_json::to_value(album()).unwrap();
+        value.as_object_mut().unwrap().remove("kind");
+        let data = serde_json::json!({"version": 1, "albums": [value]});
+        fs::write(&path, serde_json::to_vec(&data).unwrap()).unwrap();
+        let (loaded, _) = MusicLibrary::load(&path).unwrap();
+        assert_eq!(loaded.albums[0].kind, CollectionKind::Album);
     }
 
     #[test]

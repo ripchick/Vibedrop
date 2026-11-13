@@ -30,7 +30,7 @@ use crate::music::download::{
 use crate::music::player::{PlaybackState, RepeatMode, MUSIC_SOUND_PREFIX};
 use crate::music::spotify::{self, FetchedEntity, SpotifyLink};
 use crate::music::tools::Tools;
-use crate::music::{MusicAlbum, MusicLibrary, MusicPlayer, MusicTrack, TrackStatus};
+use crate::music::{CollectionKind, MusicAlbum, MusicLibrary, MusicPlayer, MusicTrack, TrackStatus};
 use crate::paths::AppPaths;
 use crate::protocol::{parse_uri, parse_url_text, ProtocolCommand};
 use crate::settings::{CloseBehavior, RetriggerPolicy, Settings};
@@ -142,11 +142,6 @@ struct HistoryItem {
     sound_id: String,
     name: String,
     at: u64,
-    /// Where the file was when it was played, so the sound can be restored if it was removed
-    /// from the library.
-    path: Option<String>,
-    /// The address the sound was downloaded from, used when the file itself is gone.
-    url: Option<String>,
 }
 
 struct ActiveDownload {
@@ -420,6 +415,13 @@ impl VibeDropApp {
             shut_down: false,
         };
         app.sync_index();
+        // The accent field must never look empty: show the effective colour (custom or the
+        // default accent of the current theme) from the very first frame.
+        if app.settings.theme.accent.is_empty() {
+            app.accent_input = theme::hex_color(theme::default_accent(&app.settings.theme.variant));
+        } else {
+            app.accent_input = app.settings.theme.accent.clone();
+        }
         app.load_history();
         #[cfg(not(target_os = "android"))]
         app.init_hotkeys(hk_tx);
@@ -765,8 +767,6 @@ impl VibeDropApp {
                     sound_id: sound_id.to_string(),
                     name: name.to_string(),
                     at: item.get("at").and_then(|v| v.as_u64()).unwrap_or_else(unix_now),
-                    path: item.get("path").and_then(|v| v.as_str()).map(str::to_string),
-                    url: item.get("url").and_then(|v| v.as_str()).map(str::to_string),
                 });
             }
             self.history.truncate(HISTORY_MAX);
@@ -812,135 +812,13 @@ impl VibeDropApp {
 
     fn note_played(&mut self, id: &str, name: String) {
         self.now_playing = Some(id.to_string());
-        let entry = self.library.get(id);
-        let path = entry.map(|e| e.path.display().to_string());
-        let url = entry.and_then(|e| match &e.source {
-            crate::library::ImportSource::Url(url) => Some(url.to_string()),
-            _ => None,
-        });
         self.history.push_front(HistoryItem {
             sound_id: id.to_string(),
             name,
             at: unix_now(),
-            path,
-            url,
         });
         self.history.truncate(HISTORY_MAX);
         self.save_history();
-    }
-
-    /// Put a sound that was removed from the library back into "My sounds".
-    ///
-    /// The file is used when it is still on disk; otherwise the sound is downloaded again from
-    /// the address it came from.
-    fn restore_sound(&mut self, item: &HistoryItem) {
-        let lang = self.settings.language.clone();
-        // The sound keeps its old id, so the history entry is "available" again right away.
-        let sound_id = item.sound_id.clone();
-        if let Some(path) = item.path.as_ref().map(PathBuf::from) {
-            if path.is_file() {
-                let hash = file_fingerprint(&path).ok();
-                let entry = SoundEntry {
-                    id: sound_id.clone(),
-                    name: item.name.clone(),
-                    path: path.clone(),
-                    duration_secs: None,
-                    source: match item.url.as_ref().and_then(|u| Url::parse(u).ok()) {
-                        Some(url) => crate::library::ImportSource::Url(url.to_string()),
-                        None => crate::library::ImportSource::Local,
-                    },
-                    hotkey: None,
-                    favorite: false,
-                    added_at: unix_now(),
-                    volume: 1.0,
-                    content_hash: hash,
-                };
-                self.engine.preload(&sound_id, &entry.path);
-                let _ = self.library.remove(&sound_id);
-                self.library.add_entry(entry);
-                self.save_library();
-                self.sync_index();
-                let text = if lang::ru(&lang) {
-                    format!("Восстановлено: «{}»", item.name)
-                } else {
-                    format!("Restored: \"{}\"", item.name)
-                };
-                self.toast(ToastKind::Success, text);
-                return;
-            }
-        }
-        if let Some(url) = item.url.as_ref().and_then(|u| Url::parse(u).ok()) {
-            match self.start_download(url, false) {
-                Ok(()) => {
-                    let text = if lang::ru(&lang) {
-                        format!("Скачиваем заново: «{}»", item.name)
-                    } else {
-                        format!("Downloading again: \"{}\"", item.name)
-                    };
-                    self.toast(ToastKind::Info, text);
-                }
-                Err(e) => self.toast(ToastKind::Error, lang::tx(&lang, &e)),
-            }
-            return;
-        }
-        // No address and no known path: look for a file with the same name in VibeDrop's own
-        // sound folder.
-        if let Some(path) = self.find_sound_by_name(&item.name) {
-            let hash = file_fingerprint(&path).ok();
-            let entry = SoundEntry {
-                id: sound_id.clone(),
-                name: item.name.clone(),
-                path: path.clone(),
-                duration_secs: None,
-                source: crate::library::ImportSource::Local,
-                hotkey: None,
-                favorite: false,
-                added_at: unix_now(),
-                volume: 1.0,
-                content_hash: hash,
-            };
-            self.engine.preload(&sound_id, &entry.path);
-            let _ = self.library.remove(&sound_id);
-            self.library.add_entry(entry);
-            self.save_library();
-            self.sync_index();
-            let text = if lang::ru(&lang) {
-                format!("Восстановлено: «{}»", item.name)
-            } else {
-                format!("Restored: \"{}\"", item.name)
-            };
-            self.toast(ToastKind::Success, text);
-            return;
-        }
-        let text = if lang::ru(&lang) {
-            format!("Не удалось вернуть «{}»: файл не найден.", item.name)
-        } else {
-            format!("Could not restore \"{}\": the file is gone.", item.name)
-        };
-        self.toast(ToastKind::Error, text);
-    }
-
-    /// Look for a file with this name in the folder where VibeDrop keeps its own copies.
-    fn find_sound_by_name(&self, name: &str) -> Option<PathBuf> {
-        let wanted = name.trim().to_lowercase();
-        if wanted.is_empty() {
-            return None;
-        }
-        let entries = std::fs::read_dir(&self.paths.sounds_dir).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let stem = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            if stem == wanted {
-                return Some(path);
-            }
-        }
-        None
     }
 
     /// Keep the "recently played" list between sessions.
@@ -953,8 +831,6 @@ impl VibeDropApp {
                     "sound_id": h.sound_id,
                     "name": h.name,
                     "at": h.at,
-                    "path": h.path,
-                    "url": h.url,
                 })
             })
             .collect();
@@ -981,8 +857,6 @@ impl VibeDropApp {
                 sound_id: sound_id.to_string(),
                 name: name.to_string(),
                 at: item.get("at").and_then(|v| v.as_u64()).unwrap_or_else(unix_now),
-                path: item.get("path").and_then(|v| v.as_str()).map(str::to_string),
-                url: item.get("url").and_then(|v| v.as_str()).map(str::to_string),
             });
         }
         self.history.truncate(HISTORY_MAX);
@@ -1335,6 +1209,11 @@ impl VibeDropApp {
 
     fn add_music_entity(&mut self, entity: FetchedEntity, link: &SpotifyLink) {
         let lang = self.settings.language.clone();
+        let kind = match entity.kind {
+            spotify::SpotifyKind::Playlist => CollectionKind::Playlist,
+            spotify::SpotifyKind::Track => CollectionKind::Track,
+            spotify::SpotifyKind::Album => CollectionKind::Album,
+        };
         let canonical = link.canonical_url();
         if let Some(existing) = self
             .music
@@ -1347,16 +1226,39 @@ impl VibeDropApp {
             self.toast(
                 ToastKind::Info,
                 if lang::ru(&lang) {
-                    "Этот альбом уже добавлен — докачиваем недостающие треки.".to_string()
+                    match kind {
+                        CollectionKind::Playlist => {
+                            "Этот плейлист уже добавлен — докачиваем недостающие треки.".to_string()
+                        }
+                        CollectionKind::Track => {
+                            "Этот трек уже добавлен — докачиваем его при необходимости.".to_string()
+                        }
+                        CollectionKind::Album => "Этот альбом уже добавлен — докачиваем недостающие треки.".to_string(),
+                    }
                 } else {
-                    "This album is already in your music library. Downloading the missing tracks.".to_string()
+                    match kind {
+                        CollectionKind::Playlist => {
+                            "This playlist is already in your music library. Downloading the missing tracks."
+                                .to_string()
+                        }
+                        CollectionKind::Track => {
+                            "This track is already in your music library. Downloading it if needed.".to_string()
+                        }
+                        CollectionKind::Album => {
+                            "This album is already in your music library. Downloading the missing tracks.".to_string()
+                        }
+                    }
                 },
             );
             self.queue_album_downloads(&existing);
             return;
         }
         let album_title = if entity.title.trim().is_empty() {
-            "Untitled album".to_string()
+            match kind {
+                CollectionKind::Playlist => "Untitled playlist".to_string(),
+                CollectionKind::Track => "Untitled track".to_string(),
+                CollectionKind::Album => "Untitled album".to_string(),
+            }
         } else {
             entity.title.clone()
         };
@@ -1368,6 +1270,7 @@ impl VibeDropApp {
             cover_url: entity.cover_url.clone(),
             source_url: canonical,
             added_at: unix_now(),
+            kind,
             tracks: Vec::new(),
         };
         for fetched in entity.tracks {
@@ -2856,9 +2759,21 @@ impl VibeDropApp {
                                 .color(theme::c_text_dim()),
                         );
                         let mut volume = row.volume;
-                        let slider = egui::Slider::new(&mut volume, 0.0..=MAX_ENTRY_VOLUME)
-                            .custom_formatter(|v, _| format!("{:.0}%", v * 100.0));
-                        if ui.add(slider).changed() {
+                        let volume_changed = ui
+                            .horizontal(|ui| {
+                                ui.spacing_mut().slider_width = 100.0;
+                                let changed =
+                                    theme::range_slider(ui, &mut volume, 0.0..=MAX_ENTRY_VOLUME, true).changed();
+                                ui.label(
+                                    RichText::new(format!("{:.0}%", volume * 100.0))
+                                        .monospace()
+                                        .size(12.0)
+                                        .color(theme::c_text_dim()),
+                                );
+                                changed
+                            })
+                            .inner;
+                        if volume_changed {
                             *action = Some(Action::SetVolume(row.id.clone(), volume));
                         }
                         ui.separator();
@@ -3042,7 +2957,7 @@ impl VibeDropApp {
                     egui::TextEdit::singleline(&mut self.music_url)
                         .hint_text(lang::t(
                             &lang,
-                            "Paste a Spotify track or album link, e.g. https://open.spotify.com/album/...",
+                            "Paste a Spotify track, album or playlist link, e.g. https://open.spotify.com/playlist/...",
                         ))
                         .desired_width(width),
                 );
@@ -3050,7 +2965,7 @@ impl VibeDropApp {
                 let button = if self.music_importing {
                     lang::t(&lang, "Importing...")
                 } else {
-                    lang::t(&lang, "Import album")
+                    lang::t(&lang, "Add to Music")
                 };
                 if ui
                     .add_enabled(
@@ -3073,7 +2988,7 @@ impl VibeDropApp {
                 ui.label(
                     RichText::new(lang::t(
                         &lang,
-                        "Albums are grouped by release; all tracks are downloaded in the background through SoundCloud, then YouTube if needed.",
+                        "Albums and playlists are grouped; all tracks are downloaded in the background through SoundCloud, then YouTube if needed.",
                     ))
                     .size(12.0)
                     .color(theme::c_text_faint()),
@@ -3333,7 +3248,7 @@ impl VibeDropApp {
                     ui.label(
                         RichText::new(lang::t(
                             &lang,
-                            "Paste a Spotify track or album link above; the tracks are downloaded into the music cache and appear here.",
+                            "Paste a Spotify track, album or playlist link above; the tracks are downloaded into the music cache and appear here.",
                         ))
                         .color(theme::c_text_dim()),
                     );
@@ -3367,7 +3282,7 @@ impl VibeDropApp {
                 |ui| {
                     ui.set_width(left_w);
                     ui.label(
-                        RichText::new(lang::t(&lang, "ALBUMS"))
+                        RichText::new(lang::t(&lang, "ALBUMS & PLAYLISTS"))
                             .size(11.0)
                             .strong()
                             .color(theme::c_text_faint()),
@@ -3380,10 +3295,28 @@ impl VibeDropApp {
                             for album in &albums {
                                 let is_selected = selected.as_deref() == Some(album.id.as_str());
                                 let is_current = current_album.as_deref() == Some(album.id.as_str());
-                                theme::sound_card(is_current).show(ui, |ui| {
+                                // Reserve the whole card before drawing it. The card itself then
+                                // reacts to a click anywhere (cover, title, meta, empty space),
+                                // while the play button added later stays on top of this area.
+                                let row_height = 38.0 + 22.0; // content + sound_card's 11 px margins
+                                let (row_rect, row_response) =
+                                    ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
+                                let row_response = row_response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                                let mut row_ui = ui.new_child(
+                                    egui::UiBuilder::new()
+                                        .max_rect(row_rect)
+                                        .layout(Layout::top_down(Align::Min)),
+                                );
+                                theme::sound_card(is_current).show(&mut row_ui, |ui| {
+                                    // Selectable labels sense clicks themselves and would eat the
+                                    // row click; the row is the interactive element here.
+                                    ui.style_mut().interaction.selectable_labels = false;
                                     ui.set_width(ui.available_width());
                                     ui.horizontal(|ui| {
-                                        let (art, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
+                                        // Same row rhythm as the track list: 38 px tall, a 30 px
+                                        // cover and a 30 px play button.
+                                        ui.set_min_height(38.0);
+                                        let (art, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
                                         let cover = album.cover_url.as_deref().and_then(|url| self.covers.get(url));
                                         match cover {
                                             Some(texture) => {
@@ -3411,39 +3344,42 @@ impl VibeDropApp {
                                                     ui.painter(),
                                                     Icon::Music,
                                                     art.center(),
-                                                    18.0,
+                                                    16.0,
                                                     theme::c_accent(),
                                                 );
                                             }
                                         }
-                                        ui.vertical(|ui| {
-                                            ui.spacing_mut().item_spacing.y = 0.0;
-                                            let color = if is_selected {
-                                                theme::c_accent()
-                                            } else {
-                                                theme::c_text()
-                                            };
-                                            if ui
-                                                .add(
+                                        // Leave the play button's place before the text is laid
+                                        // out. Otherwise a long title is drawn under the button.
+                                        let text_w = (ui.available_width() - 38.0).max(60.0);
+                                        ui.allocate_ui_with_layout(
+                                            vec2(text_w, 38.0),
+                                            Layout::top_down(Align::Min),
+                                            |ui| {
+                                                ui.set_width(text_w);
+                                                ui.spacing_mut().item_spacing.y = 0.0;
+                                                let color = if is_selected {
+                                                    theme::c_accent()
+                                                } else {
+                                                    theme::c_text()
+                                                };
+                                                ui.add(
                                                     egui::Label::new(
-                                                        RichText::new(&album.title).size(13.5).strong().color(color),
+                                                        RichText::new(&album.title).size(14.0).strong().color(color),
                                                     )
-                                                    .wrap_mode(egui::TextWrapMode::Truncate)
-                                                    .sense(Sense::click()),
-                                                )
-                                                .clicked()
-                                            {
-                                                action = Some(MusicAction::SelectAlbum(album.id.clone()));
-                                            }
-                                            let meta = if ru {
-                                                format!("{} · {} треков", album.artist, album.tracks.len())
-                                            } else {
-                                                format!("{} · {} tracks", album.artist, album.tracks.len())
-                                            };
-                                            ui.label(RichText::new(meta).size(11.5).color(theme::c_text_faint()));
-                                        });
+                                                    .wrap_mode(egui::TextWrapMode::Truncate),
+                                                );
+                                                let meta = if ru {
+                                                    format!("{} · {} треков", album.artist, album.tracks.len())
+                                                } else {
+                                                    format!("{} · {} tracks", album.artist, album.tracks.len())
+                                                };
+                                                ui.label(RichText::new(meta).size(11.5).color(theme::c_text_faint()));
+                                            },
+                                        );
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            if theme::round_button(ui, Icon::Play, 28.0, true, !album.tracks.is_empty())
+                                            if theme::round_button(ui, Icon::Play, 30.0, true, !album.tracks.is_empty())
+                                                .on_hover_text(lang::t(&lang, "Play"))
                                                 .clicked()
                                             {
                                                 action = Some(MusicAction::PlayAlbum(album.id.clone(), 0));
@@ -3451,6 +3387,9 @@ impl VibeDropApp {
                                         });
                                     });
                                 });
+                                if row_response.clicked() {
+                                    action = Some(MusicAction::SelectAlbum(album.id.clone()));
+                                }
                             }
                         });
                 },
@@ -3465,7 +3404,9 @@ impl VibeDropApp {
                 |ui| {
                     ui.set_width(right_w);
                     let Some(album) = &selected_album else {
-                        ui.label(RichText::new(lang::t(&lang, "Select an album")).color(theme::c_text_dim()));
+                        ui.label(
+                            RichText::new(lang::t(&lang, "Select an album or playlist")).color(theme::c_text_dim()),
+                        );
                         return;
                     };
                     ui.horizontal(|ui| {
@@ -3496,9 +3437,18 @@ impl VibeDropApp {
                                 )
                                 .wrap_mode(egui::TextWrapMode::Truncate),
                             );
+                            let prefix = if album.kind.is_playlist() {
+                                if ru {
+                                    "Плейлист · "
+                                } else {
+                                    "Playlist · "
+                                }
+                            } else {
+                                ""
+                            };
                             let meta = if ru {
                                 format!(
-                                    "{} · {} треков · {} · готово {}/{}",
+                                    "{prefix}{} · {} треков · {} · готово {}/{}",
                                     album.artist,
                                     album.tracks.len(),
                                     theme::fmt_time(album.duration_secs()),
@@ -3507,7 +3457,7 @@ impl VibeDropApp {
                                 )
                             } else {
                                 format!(
-                                    "{} · {} tracks · {} · {}/{} ready",
+                                    "{prefix}{} · {} tracks · {} · {}/{} ready",
                                     album.artist,
                                     album.tracks.len(),
                                     theme::fmt_time(album.duration_secs()),
@@ -3521,8 +3471,13 @@ impl VibeDropApp {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if theme::secondary_button(ui, lang::t(&lang, "Remove album"))
-                                .on_hover_text(lang::t(&lang, "Removes the album and its cached audio from VibeDrop."))
+                            let remove_label = if album.kind.is_playlist() {
+                                lang::t(&lang, "Remove playlist")
+                            } else {
+                                lang::t(&lang, "Remove album")
+                            };
+                            if theme::secondary_button(ui, remove_label)
+                                .on_hover_text(lang::t(&lang, "Removes it and its cached audio from VibeDrop."))
                                 .clicked()
                             {
                                 action = Some(MusicAction::RemoveAlbum(album.id.clone()));
@@ -3675,7 +3630,6 @@ impl VibeDropApp {
         let lang = self.settings.language.clone();
         let mut clear = false;
         let mut play: Option<String> = None;
-        let mut restore: Option<usize> = None;
         page_header(
             ui,
             lang::t(&lang, "History"),
@@ -3705,7 +3659,7 @@ impl VibeDropApp {
             ui.push_id("history_scroll", |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 8.0;
-                    for (index, item) in self.history.iter().enumerate() {
+                    for item in self.history.iter() {
                         let exists = self.library.get(&item.sound_id).is_some();
                         theme::frame_card().show(ui, |ui| {
                             ui.set_width(ui.available_width());
@@ -3715,7 +3669,7 @@ impl VibeDropApp {
                                     play = Some(item.sound_id.clone());
                                 }
                                 let color = if exists { theme::c_text() } else { theme::c_text_faint() };
-                                let name_width = (ui.available_width() - 300.0).max(100.0);
+                                let name_width = (ui.available_width() - 160.0).max(100.0);
                                 ui.allocate_ui_with_layout(
                                     vec2(name_width, 36.0),
                                     Layout::left_to_right(Align::Center),
@@ -3733,14 +3687,6 @@ impl VibeDropApp {
                                             .size(12.5)
                                             .color(theme::c_text_dim()),
                                     );
-                                    if !exists {
-                                        // The sound was removed from the library: offer to bring it
-                                        // back (from the file on disk or from its download address).
-                                        if theme::secondary_button(ui, lang::t(&lang, "Restore to My Sounds")).clicked()
-                                        {
-                                            restore = Some(index);
-                                        }
-                                    }
                                 });
                             });
                         });
@@ -3756,11 +3702,6 @@ impl VibeDropApp {
         }
         if let Some(id) = play {
             self.play_sound(&id);
-        }
-        if let Some(index) = restore {
-            if let Some(item) = self.history.get(index).cloned() {
-                self.restore_sound(&item);
-            }
         }
     }
 
@@ -4213,16 +4154,25 @@ impl VibeDropApp {
                     theme::section_title(ui, lang::t(&lang, "APPEARANCE"));
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(lang::t(&lang, "Theme")).strong());
+                        let mut theme_changed = false;
                         for (id, name) in [
                             ("dark", "Classic dark"),
                             ("midnight", "Midnight"),
                             ("light", "Light"),
                         ] {
-                            ui.selectable_value(
-                                &mut self.settings.theme.variant,
-                                id.to_string(),
-                                lang::t(&lang, name),
-                            );
+                            theme_changed |= ui
+                                .selectable_value(
+                                    &mut self.settings.theme.variant,
+                                    id.to_string(),
+                                    lang::t(&lang, name),
+                                )
+                                .changed();
+                        }
+                        if theme_changed && self.settings.theme.accent.is_empty() {
+                            // The field follows the theme's default accent until the user picks
+                            // a colour of their own.
+                            self.accent_input =
+                                theme::hex_color(theme::default_accent(&self.settings.theme.variant));
                         }
                     });
                     ui.add_space(6.0);
@@ -4230,8 +4180,12 @@ impl VibeDropApp {
                         ui.label(RichText::new(lang::t(&lang, "Accent colour")).strong());
                         // The field keeps the text that is being typed; the settings only receive
                         // it once it is a complete colour, so a half-typed value is not lost.
-                        if self.accent_input.is_empty() && !self.settings.theme.accent.is_empty() {
-                            self.accent_input = self.settings.theme.accent.clone();
+                        if self.accent_input.is_empty() {
+                            self.accent_input = if self.settings.theme.accent.is_empty() {
+                                theme::hex_color(theme::default_accent(&self.settings.theme.variant))
+                            } else {
+                                self.settings.theme.accent.clone()
+                            };
                         }
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut self.accent_input)
@@ -4243,21 +4197,20 @@ impl VibeDropApp {
                             let text = self.accent_input.trim().to_string();
                             match theme::parse_color(&text) {
                                 Some(color) => {
-                                    let hex = format!(
-                                        "#{:02X}{:02X}{:02X}",
-                                        color.r(),
-                                        color.g(),
-                                        color.b()
-                                    );
+                                    let hex = theme::hex_color(color);
                                     self.accent_input = hex.clone();
                                     self.settings.theme.accent = hex;
                                     self.settings_dirty = true;
                                 }
                                 None => {
                                     if text.is_empty() {
-                                        // An empty field means "use the built-in accent".
-                                        self.settings.theme.accent = String::new();
-                                        self.settings_dirty = true;
+                                        // The hex code is permanent: clearing the box puts the
+                                        // colour that is currently in use right back.
+                                        self.accent_input = if self.settings.theme.accent.is_empty() {
+                                            theme::hex_color(theme::default_accent(&self.settings.theme.variant))
+                                        } else {
+                                            self.settings.theme.accent.clone()
+                                        };
                                     } else {
                                         invalid = true;
                                     }
@@ -4286,12 +4239,7 @@ impl VibeDropApp {
                                 )
                                 .clicked()
                             {
-                                let hex = format!(
-                                    "#{:02X}{:02X}{:02X}",
-                                    color.r(),
-                                    color.g(),
-                                    color.b()
-                                );
+                                let hex = theme::hex_color(color);
                                 self.accent_input = hex.clone();
                                 self.settings.theme.accent = hex;
                                 self.settings_dirty = true;
@@ -4301,19 +4249,34 @@ impl VibeDropApp {
                     ui.add_space(6.0);
                     let mut radius = self.settings.theme.corner_radius;
                     if ui
-                        .add(
-                            egui::Slider::new(&mut radius, 0.0..=20.0)
-                                .text("Corner radius"),
-                        )
-                        .changed()
+                        .horizontal(|ui| {
+                            setting_slider(
+                                ui,
+                                lang::t(&lang, "Corner radius"),
+                                &mut radius,
+                                0.0..=20.0,
+                                true,
+                                |v| format!("{v:.0}"),
+                            )
+                        })
+                        .inner
                     {
-                        self.settings.theme.corner_radius = radius;
+                        self.settings.theme.corner_radius = radius.round();
                         self.settings_dirty = true;
                     }
                     let mut font = self.settings.theme.font_scale;
                     if ui
-                        .add(egui::Slider::new(&mut font, 12.0..=20.0).text("Font size"))
-                        .changed()
+                        .horizontal(|ui| {
+                            setting_slider(
+                                ui,
+                                lang::t(&lang, "Font size"),
+                                &mut font,
+                                12.0..=20.0,
+                                true,
+                                |v| format!("{v:.1}"),
+                            )
+                        })
+                        .inner
                     {
                         self.settings.theme.font_scale = font;
                         self.settings_dirty = true;
@@ -4378,20 +4341,38 @@ impl VibeDropApp {
                         &mut self.settings.playback.stop_on_focus_loss,
                     );
                     ui.add_space(6.0);
-                    let mut offset = self.settings.playback.start_offset_secs;
+                    let mut offset = self.settings.playback.start_offset_secs as f32;
                     if ui
-                        .add(egui::Slider::new(&mut offset, 0.0..=30.0).text("Start offset (s)"))
-                        .changed()
+                        .horizontal(|ui| {
+                            setting_slider(
+                                ui,
+                                lang::t(&lang, "Start offset (s)"),
+                                &mut offset,
+                                0.0..=30.0,
+                                true,
+                                |v| format!("{v:.0}"),
+                            )
+                        })
+                        .inner
                     {
-                        self.settings.playback.start_offset_secs = offset;
+                        self.settings.playback.start_offset_secs = offset.round() as f64;
                         self.settings_dirty = true;
                     }
-                    let mut voices = self.settings.playback.max_voices;
+                    let mut voices = self.settings.playback.max_voices as f32;
                     if ui
-                        .add(egui::Slider::new(&mut voices, 1..=32).text("Simultaneous sounds"))
-                        .changed()
+                        .horizontal(|ui| {
+                            setting_slider(
+                                ui,
+                                lang::t(&lang, "Simultaneous sounds"),
+                                &mut voices,
+                                1.0..=32.0,
+                                true,
+                                |v| format!("{v:.0}"),
+                            )
+                        })
+                        .inner
                     {
-                        self.settings.playback.max_voices = voices;
+                        self.settings.playback.max_voices = voices.round().clamp(1.0, 32.0) as u32;
                         self.settings_dirty = true;
                     }
                 });
@@ -4400,29 +4381,38 @@ impl VibeDropApp {
                 theme::frame_card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "VOLUME AND PLAYBACK"));
-                    let pct = |v: f64, _: std::ops::RangeInclusive<usize>| format!("{:.0}%", v * 100.0);
+                    // Every volume control uses the same 100 px rail and percentage as the master
+                    // slider in the header, so the sliders never look like different widgets.
                     egui::Grid::new("playback_grid").num_columns(2).spacing([24.0, 12.0]).show(ui, |ui| {
                         ui.label(lang::t(&lang, "Master volume"));
-                        ui.add(egui::Slider::new(&mut self.settings.master_volume, 0.0..=1.0).custom_formatter(pct));
+                        ui.horizontal(|ui| {
+                            volume_setting_control(ui, &mut self.settings.master_volume, true);
+                        });
                         ui.end_row();
 
                         ui.label(lang::t(&lang, "Headphones volume"));
-                        ui.add(egui::Slider::new(&mut self.settings.main_volume, 0.0..=1.0).custom_formatter(pct));
+                        ui.horizontal(|ui| {
+                            volume_setting_control(ui, &mut self.settings.main_volume, true);
+                        });
                         ui.end_row();
 
                         ui.label(lang::t(&lang, "Microphone volume"));
                         ui.horizontal(|ui| {
-                            ui.add(egui::Slider::new(&mut self.settings.mic_volume, 0.0..=1.0).custom_formatter(pct));
+                            volume_setting_control(ui, &mut self.settings.mic_volume, true);
                             ui.checkbox(&mut self.settings.mic_muted, lang::t(&lang, "Muted"));
                         });
                         ui.end_row();
 
                         ui.label(lang::t(&lang, "Your voice volume"));
-                        ui.add_enabled(self.settings.voice_enabled, egui::Slider::new(&mut self.settings.voice_volume, 0.0..=1.0).custom_formatter(pct));
+                        ui.horizontal(|ui| {
+                            volume_setting_control(ui, &mut self.settings.voice_volume, self.settings.voice_enabled);
+                        });
                         ui.end_row();
 
                         ui.label(lang::t(&lang, "Default sound volume"));
-                        ui.add(egui::Slider::new(&mut self.settings.default_sound_volume, 0.0..=1.0).custom_formatter(pct));
+                        ui.horizontal(|ui| {
+                            volume_setting_control(ui, &mut self.settings.default_sound_volume, true);
+                        });
                         ui.end_row();
 
                         ui.label(lang::t(&lang, "Overlapping sounds"));
@@ -5417,6 +5407,49 @@ fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(&m
         });
         ui.with_layout(Layout::right_to_left(Align::Center), actions);
     });
+}
+
+/// A volume slider and its percentage, the exact size of the header's master control.
+///
+/// The settings page used to draw its own `egui::Slider`s, which are 180 px wide and show the
+/// percentage inside the widget, so they looked and measured differently from the master slider
+/// at the top of the window. This helper reuses the hand-painted slider at the same 100 px width.
+fn volume_setting_control(ui: &mut Ui, value: &mut f32, enabled: bool) -> bool {
+    ui.spacing_mut().slider_width = 100.0;
+    let changed = theme::volume_slider(ui, value, enabled).changed();
+    ui.label(
+        RichText::new(format!("{:>3}%", (*value * 100.0).round() as i32))
+            .monospace()
+            .size(12.0)
+            .color(theme::c_text_dim()),
+    );
+    changed
+}
+
+/// A numeric setting row: label, the same 100 px painted rail as the volume controls, and the
+/// current value. The sliders in Settings used to be default `egui::Slider`s with a large value
+/// box, which looked nothing like the rest of the app.
+fn setting_slider(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    enabled: bool,
+    format: impl Fn(f32) -> String,
+) -> bool {
+    ui.add_sized(
+        vec2(170.0, 18.0),
+        egui::Label::new(RichText::new(label).size(12.5).color(theme::c_text_dim())),
+    );
+    ui.spacing_mut().slider_width = 100.0;
+    let changed = theme::range_slider(ui, value, range, enabled).changed();
+    ui.label(
+        RichText::new(format(*value))
+            .monospace()
+            .size(12.0)
+            .color(theme::c_text_dim()),
+    );
+    changed
 }
 
 /// "Label  [slider]  100%" inline; returns true when the value changed.

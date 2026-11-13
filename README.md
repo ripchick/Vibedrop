@@ -65,10 +65,10 @@ built-in virtual sink (PipeWire/PulseAudio) without installing anything.
   including AAC/ALAC decode). For video files the audio track plays; use
   "Extract audio to WAV" in a sound's ••• menu to save the sound as a separate WAV.
   Sounds are capped at 5 minutes.
-- **Music section**: paste a Spotify track or album link, get the album grouped with all its
-  tracks, and let VibeDrop download the audio through `yt-dlp` — SoundCloud first (a match is
-  accepted only when its duration is within 15 s of Spotify's), YouTube with "official audio"
-  as the fallback. Per-track states (Queued / Downloading / Ready / Error), an album queue and
+- **Music section**: paste a Spotify track, album or playlist link, get the collection grouped with
+  all its tracks, and let VibeDrop download the audio through `yt-dlp` — SoundCloud first (a match
+  is accepted only when its duration is within 15 s of Spotify's), YouTube with "official audio"
+  as the fallback. Per-track states (Queued / Downloading / Ready / Error), a collection queue and
   the three repeat modes (Off / All / One) play through the same headphones + microphone routes
   as the soundboard. Metadata needs no account: the public Spotify page is used by default, and
   optional Web API Client ID/Secret makes it more robust. Requires `yt-dlp` and `ffmpeg`
