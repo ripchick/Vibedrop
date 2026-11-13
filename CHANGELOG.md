@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.13.1
+
+### Added
+- **Real album covers** in the Music section: the cover of the album is fetched once from the
+  address Spotify returned with the metadata, kept in the data folder and shown in the player,
+  next to the album title and in the album list.
+- **"Restore to My sounds"** on the History page: a sound that was removed from the library can
+  be put back — from the file on disk, from the address it was downloaded from, or from a file
+  with the same name in VibeDrop's own sound folder.
+- **"Clear data"** in Settings -> Data folder: removes the library, the history, the music
+  albums and the cached MP3s (the settings are kept). A confirmation window asks first, and the
+  word `DELETE` has to be typed so that a stray click cannot wipe anything.
+- **yt-dlp and ffmpeg ship with the release.** The archives now contain a `tools/` folder with
+  both programs, so the Music section works right after the download. They stay separate
+  programs with their own licenses; see `THIRD_PARTY_NOTICES.md` and `tools/licenses/`.
+
+### Fixed
+- The volume slider in the header no longer reaches over the percentage next to it: the slider
+  is painted by hand and its handle stays inside the widget.
+- The accent colour field accepts typing again. An incomplete colour was wiped on every save
+  (the settings only keep complete colours), so nothing could be typed; the text being edited
+  now lives on its own and is applied as soon as it is a valid colour.
+
+### Removed
+- The "Check files" button and the code behind it. Sounds whose file disappeared are still
+  marked in the library and can be relinked with "Locate file...".
+
 ## 0.13.0
 
 ### Added

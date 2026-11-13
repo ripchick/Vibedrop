@@ -33,8 +33,18 @@ jobs:
           Copy-Item README.md dist/ -ErrorAction SilentlyContinue
           Copy-Item LICENSE dist/ -ErrorAction SilentlyContinue
           Copy-Item CHANGELOG.md dist/ -ErrorAction SilentlyContinue
+          Copy-Item THIRD_PARTY_NOTICES.md dist/ -ErrorAction SilentlyContinue
           Compress-Archive -Path dist/* -DestinationPath vibedrop-windows-x64.zip -Force
           Get-ChildItem dist, vibedrop-windows-x64.zip | Select-Object Name, Length
+      - name: Fetch yt-dlp and ffmpeg
+        shell: pwsh
+        run: pwsh scripts/fetch-tools.ps1 -Os windows -OutDir dist/tools
+        continue-on-error: true
+      - name: Stage release files with the tools
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/* -DestinationPath vibedrop-windows-x64.zip -Force
+          Get-ChildItem vibedrop-windows-x64.zip | Select-Object Name, Length
       - uses: actions/upload-artifact@v4
         with:
           name: vibedrop-windows-x64
@@ -61,8 +71,17 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/vibedrop dist/vibedrop
-          cp README.md LICENSE CHANGELOG.md dist/
+          cp README.md LICENSE CHANGELOG.md THIRD_PARTY_NOTICES.md dist/
           tar -czf vibedrop-linux-x64.tar.gz -C dist .
+      - name: Fetch yt-dlp and ffmpeg
+        shell: pwsh
+        run: pwsh scripts/fetch-tools.ps1 -Os linux -OutDir dist/tools
+        continue-on-error: true
+      - name: Stage release files with the tools
+        shell: pwsh
+        run: |
+          tar -czf vibedrop-linux-x64.tar.gz -C dist .
+          ls -la vibedrop-linux-x64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: vibedrop-linux-x64
@@ -88,8 +107,17 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/vibedrop dist/vibedrop
-          cp README.md LICENSE CHANGELOG.md dist/
+          cp README.md LICENSE CHANGELOG.md THIRD_PARTY_NOTICES.md dist/
           tar -czf vibedrop-macos-arm64.tar.gz -C dist .
+      - name: Fetch yt-dlp and ffmpeg
+        shell: pwsh
+        run: pwsh scripts/fetch-tools.ps1 -Os macos -OutDir dist/tools
+        continue-on-error: true
+      - name: Stage release files with the tools
+        shell: pwsh
+        run: |
+          tar -czf vibedrop-macos-arm64.tar.gz -C dist .
+          ls -la vibedrop-macos-arm64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: vibedrop-macos-arm64
@@ -120,11 +148,11 @@ jobs:
             vibedrop-linux-x64.tar.gz
             vibedrop-macos-arm64.tar.gz
           body: |
-            VibeDrop soundboard — desktop (Windows, Linux, macOS), Rust.
+            VibeDrop soundboard вЂ” desktop (Windows, Linux, macOS), Rust.
             See `README.md` / `README.ru.md` for details.
 
             Optional free virtual cable for voice chats (Windows):
-            VB-CABLE (official freeware by VB-Audio) —
+            VB-CABLE (official freeware by VB-Audio) вЂ”
             https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
             No driver ships inside VibeDrop itself.
           generate_release_notes: true

@@ -454,23 +454,49 @@ pub fn chip(ui: &mut Ui, text: &str, color: Color32, filled: bool) -> Response {
     .on_hover_cursor(CursorIcon::PointingHand)
 }
 
-/// Compact volume slider with an opaque black handle.
+/// Compact volume slider that is painted by hand.
 ///
-/// egui paints a slider handle with the current widget's `bg_fill`; on a dark panel the default
-/// translucent-looking handle let the blue track show through. Scoped visuals keep every other
-/// widget unchanged while the handle becomes solid black with a light rim.
+/// egui's own slider draws the handle as a circle that reaches past the right edge of the
+/// widget, so at 100 % the handle sat on top of the percentage next to it. This widget keeps
+/// the handle inside its own rectangle and paints the track the way the rest of the app does.
 pub fn volume_slider(ui: &mut Ui, value: &mut f32, enabled: bool) -> Response {
-    ui.scope(|ui| {
-        let w = &mut ui.style_mut().visuals.widgets;
-        w.inactive.bg_fill = Color32::from_rgb(0x0A, 0x0A, 0x0A);
-        w.inactive.fg_stroke = Stroke::new(1.4_f32, c_text_dim());
-        w.hovered.bg_fill = Color32::BLACK;
-        w.hovered.fg_stroke = Stroke::new(1.6_f32, c_accent());
-        w.active.bg_fill = Color32::BLACK;
-        w.active.fg_stroke = Stroke::new(2.0_f32, c_accent());
-        ui.add_enabled(enabled, egui::Slider::new(value, 0.0..=1.0).show_value(false))
-    })
-    .inner
+    let width = ui.spacing_mut().slider_width.max(40.0);
+    let height = 18.0;
+    let sense = if enabled {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
+    };
+    let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), sense);
+
+    if enabled && (response.clicked() || response.dragged()) {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let frac = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            if (frac - *value).abs() > f32::EPSILON {
+                *value = frac;
+                response.mark_changed();
+            }
+        }
+    }
+
+    let frac = value.clamp(0.0, 1.0);
+    let rail = Rect::from_center_size(rect.center(), vec2(rect.width(), 6.0));
+    ui.painter().rect_filled(rail, 3.0, c_border());
+    let filled = Rect::from_min_size(rail.min, vec2(rail.width() * frac, rail.height()));
+    ui.painter().rect_filled(filled, 3.0, c_accent());
+
+    // The handle is a solid dark circle with a light rim. It is clamped inside the widget, so it
+    // never reaches over the label that follows the slider.
+    let radius = (height / 2.0 - 1.0).clamp(4.0, 7.0);
+    let center_x = (rail.left() + rail.width() * frac).clamp(rect.left() + radius, rect.right() - radius);
+    let center = Pos2::new(center_x, rect.center().y);
+    ui.painter().circle_filled(center, radius, Color32::BLACK);
+    ui.painter().circle_stroke(
+        center,
+        radius,
+        Stroke::new(1.4_f32, if response.hovered() { c_accent() } else { c_text_dim() }),
+    );
+    response
 }
 
 // ---- Icons -----------------------------------------------------------------------------------

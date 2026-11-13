@@ -137,10 +137,16 @@ struct Toast {
     until: Instant,
 }
 
+#[derive(Clone)]
 struct HistoryItem {
     sound_id: String,
     name: String,
     at: u64,
+    /// Where the file was when it was played, so the sound can be restored if it was removed
+    /// from the library.
+    path: Option<String>,
+    /// The address the sound was downloaded from, used when the file itself is gone.
+    url: Option<String>,
 }
 
 struct ActiveDownload {
@@ -282,13 +288,23 @@ pub struct VibeDropApp {
     music_selected_album: Option<String>,
     music_downloading: HashSet<String>,
     music_dirty: bool,
+    /// Album covers of the Music section.
+    covers: crate::music::cover::CoverCache,
 
     discord: crate::discord::DiscordPresence,
     applied_theme: crate::settings::ThemeSettings,
+    /// The text of the accent colour field while it is being edited.
+    ///
+    /// The settings only ever hold a complete, valid colour, so a half-typed value would be
+    /// wiped on every save. The text being typed therefore lives here and is applied to the
+    /// settings as soon as it is a valid colour.
+    accent_input: String,
 
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
     url_dialog: Option<UrlDialog>,
+    /// The confirmation window for wiping the library, the history and the music cache.
+    clear_data_dialog: bool,
 
     protocol_state: ProtocolState,
 
@@ -346,6 +362,7 @@ impl VibeDropApp {
             .filter(|e| check_available(e).is_err())
             .map(|e| e.id.clone())
             .collect();
+        let cover_dir = paths.root().join("covers");
 
         let mut app = Self {
             paths,
@@ -387,11 +404,14 @@ impl VibeDropApp {
             music_selected_album,
             music_downloading: HashSet::new(),
             music_dirty: false,
+            covers: crate::music::cover::CoverCache::new(cover_dir, cc.egui_ctx.clone()),
             discord,
             applied_theme,
+            accent_input: String::new(),
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
+            clear_data_dialog: false,
             protocol_state: system::protocol_state(),
             settings_dirty: false,
             library_dirty: false,
@@ -564,6 +584,41 @@ impl VibeDropApp {
         g.retrigger = self.settings.retrigger;
     }
 
+    /// Delete the library, the history, the music library and every file VibeDrop copied into
+    /// its own folders. The settings (devices, hotkeys, appearance) are kept.
+    fn clear_all_data(&mut self) {
+        tracing::warn!("the user cleared all data (library, history, music cache)");
+        self.engine.stop_all();
+        self.music_player.stop(&self.engine);
+        self.music_downloads.cancel_all();
+        self.music_downloading.clear();
+
+        for file in [
+            &self.paths.library_file,
+            &self.paths.history_file,
+            &self.paths.music_file,
+        ] {
+            let _ = std::fs::remove_file(file);
+        }
+        for dir in [&self.paths.sounds_dir, &self.paths.music_dir] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        let _ = std::fs::create_dir_all(&self.paths.sounds_dir);
+        let _ = std::fs::create_dir_all(&self.paths.music_dir);
+
+        self.library = crate::library::Library::default();
+        self.history.clear();
+        self.music = MusicLibrary::default();
+        self.music_selected_album = None;
+        self.missing.clear();
+        self.search.clear();
+        self.now_playing = None;
+        self.save_library();
+        self.save_history();
+        self.save_music();
+        self.sync_index();
+    }
+
     fn device_config(&self) -> DeviceConfig {
         DeviceConfig {
             main: self.settings.main_output.clone(),
@@ -710,6 +765,8 @@ impl VibeDropApp {
                     sound_id: sound_id.to_string(),
                     name: name.to_string(),
                     at: item.get("at").and_then(|v| v.as_u64()).unwrap_or_else(unix_now),
+                    path: item.get("path").and_then(|v| v.as_str()).map(str::to_string),
+                    url: item.get("url").and_then(|v| v.as_str()).map(str::to_string),
                 });
             }
             self.history.truncate(HISTORY_MAX);
@@ -755,13 +812,135 @@ impl VibeDropApp {
 
     fn note_played(&mut self, id: &str, name: String) {
         self.now_playing = Some(id.to_string());
+        let entry = self.library.get(id);
+        let path = entry.map(|e| e.path.display().to_string());
+        let url = entry.and_then(|e| match &e.source {
+            crate::library::ImportSource::Url(url) => Some(url.to_string()),
+            _ => None,
+        });
         self.history.push_front(HistoryItem {
             sound_id: id.to_string(),
             name,
             at: unix_now(),
+            path,
+            url,
         });
         self.history.truncate(HISTORY_MAX);
         self.save_history();
+    }
+
+    /// Put a sound that was removed from the library back into "My sounds".
+    ///
+    /// The file is used when it is still on disk; otherwise the sound is downloaded again from
+    /// the address it came from.
+    fn restore_sound(&mut self, item: &HistoryItem) {
+        let lang = self.settings.language.clone();
+        // The sound keeps its old id, so the history entry is "available" again right away.
+        let sound_id = item.sound_id.clone();
+        if let Some(path) = item.path.as_ref().map(PathBuf::from) {
+            if path.is_file() {
+                let hash = file_fingerprint(&path).ok();
+                let entry = SoundEntry {
+                    id: sound_id.clone(),
+                    name: item.name.clone(),
+                    path: path.clone(),
+                    duration_secs: None,
+                    source: match item.url.as_ref().and_then(|u| Url::parse(u).ok()) {
+                        Some(url) => crate::library::ImportSource::Url(url.to_string()),
+                        None => crate::library::ImportSource::Local,
+                    },
+                    hotkey: None,
+                    favorite: false,
+                    added_at: unix_now(),
+                    volume: 1.0,
+                    content_hash: hash,
+                };
+                self.engine.preload(&sound_id, &entry.path);
+                let _ = self.library.remove(&sound_id);
+                self.library.add_entry(entry);
+                self.save_library();
+                self.sync_index();
+                let text = if lang::ru(&lang) {
+                    format!("Восстановлено: «{}»", item.name)
+                } else {
+                    format!("Restored: \"{}\"", item.name)
+                };
+                self.toast(ToastKind::Success, text);
+                return;
+            }
+        }
+        if let Some(url) = item.url.as_ref().and_then(|u| Url::parse(u).ok()) {
+            match self.start_download(url, false) {
+                Ok(()) => {
+                    let text = if lang::ru(&lang) {
+                        format!("Скачиваем заново: «{}»", item.name)
+                    } else {
+                        format!("Downloading again: \"{}\"", item.name)
+                    };
+                    self.toast(ToastKind::Info, text);
+                }
+                Err(e) => self.toast(ToastKind::Error, lang::tx(&lang, &e)),
+            }
+            return;
+        }
+        // No address and no known path: look for a file with the same name in VibeDrop's own
+        // sound folder.
+        if let Some(path) = self.find_sound_by_name(&item.name) {
+            let hash = file_fingerprint(&path).ok();
+            let entry = SoundEntry {
+                id: sound_id.clone(),
+                name: item.name.clone(),
+                path: path.clone(),
+                duration_secs: None,
+                source: crate::library::ImportSource::Local,
+                hotkey: None,
+                favorite: false,
+                added_at: unix_now(),
+                volume: 1.0,
+                content_hash: hash,
+            };
+            self.engine.preload(&sound_id, &entry.path);
+            let _ = self.library.remove(&sound_id);
+            self.library.add_entry(entry);
+            self.save_library();
+            self.sync_index();
+            let text = if lang::ru(&lang) {
+                format!("Восстановлено: «{}»", item.name)
+            } else {
+                format!("Restored: \"{}\"", item.name)
+            };
+            self.toast(ToastKind::Success, text);
+            return;
+        }
+        let text = if lang::ru(&lang) {
+            format!("Не удалось вернуть «{}»: файл не найден.", item.name)
+        } else {
+            format!("Could not restore \"{}\": the file is gone.", item.name)
+        };
+        self.toast(ToastKind::Error, text);
+    }
+
+    /// Look for a file with this name in the folder where VibeDrop keeps its own copies.
+    fn find_sound_by_name(&self, name: &str) -> Option<PathBuf> {
+        let wanted = name.trim().to_lowercase();
+        if wanted.is_empty() {
+            return None;
+        }
+        let entries = std::fs::read_dir(&self.paths.sounds_dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if stem == wanted {
+                return Some(path);
+            }
+        }
+        None
     }
 
     /// Keep the "recently played" list between sessions.
@@ -769,7 +948,15 @@ impl VibeDropApp {
         let items: Vec<serde_json::Value> = self
             .history
             .iter()
-            .map(|h| serde_json::json!({"sound_id": h.sound_id, "name": h.name, "at": h.at}))
+            .map(|h| {
+                serde_json::json!({
+                    "sound_id": h.sound_id,
+                    "name": h.name,
+                    "at": h.at,
+                    "path": h.path,
+                    "url": h.url,
+                })
+            })
             .collect();
         if let Ok(text) = serde_json::to_string_pretty(&items) {
             let _ = crate::fsutil::write_atomic(&self.paths.history_file, text.as_bytes());
@@ -794,6 +981,8 @@ impl VibeDropApp {
                 sound_id: sound_id.to_string(),
                 name: name.to_string(),
                 at: item.get("at").and_then(|v| v.as_u64()).unwrap_or_else(unix_now),
+                path: item.get("path").and_then(|v| v.as_str()).map(str::to_string),
+                url: item.get("url").and_then(|v| v.as_str()).map(str::to_string),
             });
         }
         self.history.truncate(HISTORY_MAX);
@@ -933,29 +1122,6 @@ impl VibeDropApp {
                 self.toast(ToastKind::Info, text);
             }
             Err(e) => self.toast(ToastKind::Error, lang::tx(&lang, &e.to_string())),
-        }
-    }
-
-    /// Re-scan the library for files that disappeared and report the result.
-    fn check_library_files(&mut self) {
-        let lang = self.settings.language.clone();
-        let missing = self.library.missing_ids();
-        let count = missing.len();
-        self.missing = missing.into_iter().collect();
-        if count == 0 {
-            let text = if lang::ru(&lang) {
-                format!("Все файлы звуков на месте ({})", self.library.len())
-            } else {
-                format!("All {} sound files are present", self.library.len())
-            };
-            self.toast(ToastKind::Success, text);
-        } else {
-            let text = if lang::ru(&lang) {
-                format!("Отсутствуют файлы звуков: {count}. Нажмите «Указать файл...» в меню \u{2022}\u{2022}\u{2022}, чтобы найти их.")
-            } else {
-                format!("{count} sound file(s) are missing. Use \"Locate file...\" in the \u{2022}\u{2022}\u{2022} menu to repair them.")
-            };
-            self.toast(ToastKind::Error, text);
         }
     }
 
@@ -2013,7 +2179,6 @@ impl VibeDropApp {
         let progress = now_id.as_deref().and_then(|id| self.engine.progress(id));
         let mut want_import = false;
         let mut want_url = false;
-        let mut want_check = false;
         let mut want_quit = false;
         let mut want_about = false;
         let mut want_cable_page = false;
@@ -2049,10 +2214,6 @@ impl VibeDropApp {
                             want_url = true;
                             ui.close_menu();
                         }
-                        if ui.button(lang::t(&lang, "Check files")).clicked() {
-                            want_check = true;
-                            ui.close_menu();
-                        }
                         ui.separator();
                         if ui.button(lang::t(&lang, "Quit VibeDrop")).clicked() {
                             want_quit = true;
@@ -2062,10 +2223,6 @@ impl VibeDropApp {
                     ui.menu_button(lang::t(&lang, "Edit"), |ui| {
                         if ui.button(lang::t(&lang, "Import")).clicked() {
                             want_import = true;
-                            ui.close_menu();
-                        }
-                        if ui.button(lang::t(&lang, "Check files")).clicked() {
-                            want_check = true;
                             ui.close_menu();
                         }
                     });
@@ -2159,9 +2316,6 @@ impl VibeDropApp {
                 error: None,
                 focus: true,
             });
-        }
-        if want_check {
-            self.check_library_files();
         }
         if let Some(page) = go_page {
             self.page = page;
@@ -2390,7 +2544,6 @@ impl VibeDropApp {
         let favorites_only = self.page == Page::Favorites;
         let mut want_import = false;
         let mut want_url = false;
-        let mut want_check = false;
 
         let favorites = self.library.favorites().len();
         let total = self.library.len();
@@ -2417,12 +2570,6 @@ impl VibeDropApp {
                 }
                 if theme::secondary_button(ui, lang::t(&lang, "Import")).clicked() {
                     want_import = true;
-                }
-                if theme::secondary_button(ui, lang::t(&lang, "Check files"))
-                    .on_hover_text(lang::t(&lang, "Look for sound files that were moved or deleted"))
-                    .clicked()
-                {
-                    want_check = true;
                 }
             }
         });
@@ -2618,9 +2765,6 @@ impl VibeDropApp {
         }
         if want_import {
             self.pick_and_import();
-        }
-        if want_check {
-            self.check_library_files();
         }
         if want_url {
             self.url_dialog = Some(UrlDialog {
@@ -3001,19 +3145,35 @@ impl VibeDropApp {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (art, _) = ui.allocate_exact_size(vec2(50.0, 50.0), Sense::hover());
-                ui.painter()
-                    .rect_filled(art, Rounding::same(10.0), theme::c_accent_fill());
-                theme::paint_icon(
-                    ui.painter(),
-                    Icon::Music,
-                    art.center(),
-                    26.0,
-                    if track.is_some() {
-                        theme::c_accent()
-                    } else {
-                        theme::c_text_faint()
-                    },
-                );
+                let cover = album
+                    .as_ref()
+                    .and_then(|a| a.cover_url.as_deref())
+                    .and_then(|url| self.covers.get(url));
+                match cover {
+                    Some(texture) => {
+                        ui.painter().image(
+                            texture.id(),
+                            egui::Rect::from_min_size(art.min, art.size()),
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                    None => {
+                        ui.painter()
+                            .rect_filled(art, Rounding::same(10.0), theme::c_accent_fill());
+                        theme::paint_icon(
+                            ui.painter(),
+                            Icon::Music,
+                            art.center(),
+                            26.0,
+                            if track.is_some() {
+                                theme::c_accent()
+                            } else {
+                                theme::c_text_faint()
+                            },
+                        );
+                    }
+                }
                 let info_w = (ui.available_width() - 340.0).max(140.0);
                 ui.allocate_ui_with_layout(vec2(info_w, 50.0), Layout::top_down(Align::Min), |ui| {
                     ui.set_width(info_w);
@@ -3224,22 +3384,38 @@ impl VibeDropApp {
                                     ui.set_width(ui.available_width());
                                     ui.horizontal(|ui| {
                                         let (art, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
-                                        ui.painter().rect_filled(
-                                            art,
-                                            Rounding::same(7.0),
-                                            if is_current {
-                                                theme::c_accent_dim()
-                                            } else {
-                                                theme::c_accent_fill()
-                                            },
-                                        );
-                                        theme::paint_icon(
-                                            ui.painter(),
-                                            Icon::Music,
-                                            art.center(),
-                                            18.0,
-                                            theme::c_accent(),
-                                        );
+                                        let cover = album.cover_url.as_deref().and_then(|url| self.covers.get(url));
+                                        match cover {
+                                            Some(texture) => {
+                                                ui.painter().image(
+                                                    texture.id(),
+                                                    egui::Rect::from_min_size(art.min, art.size()),
+                                                    egui::Rect::from_min_max(
+                                                        egui::Pos2::ZERO,
+                                                        egui::Pos2::new(1.0, 1.0),
+                                                    ),
+                                                    egui::Color32::WHITE,
+                                                );
+                                            }
+                                            None => {
+                                                ui.painter().rect_filled(
+                                                    art,
+                                                    Rounding::same(7.0),
+                                                    if is_current {
+                                                        theme::c_accent_dim()
+                                                    } else {
+                                                        theme::c_accent_fill()
+                                                    },
+                                                );
+                                                theme::paint_icon(
+                                                    ui.painter(),
+                                                    Icon::Music,
+                                                    art.center(),
+                                                    18.0,
+                                                    theme::c_accent(),
+                                                );
+                                            }
+                                        }
                                         ui.vertical(|ui| {
                                             ui.spacing_mut().item_spacing.y = 0.0;
                                             let color = if is_selected {
@@ -3292,32 +3468,55 @@ impl VibeDropApp {
                         ui.label(RichText::new(lang::t(&lang, "Select an album")).color(theme::c_text_dim()));
                         return;
                     };
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 1.0;
-                        ui.add(
-                            egui::Label::new(RichText::new(&album.title).size(24.0).strong().color(theme::c_text()))
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 14.0;
+                        // The real cover of the album, as decoration next to its title.
+                        let (art, _) = ui.allocate_exact_size(vec2(84.0, 84.0), Sense::hover());
+                        let cover = album.cover_url.as_deref().and_then(|url| self.covers.get(url));
+                        match cover {
+                            Some(texture) => {
+                                ui.painter().image(
+                                    texture.id(),
+                                    egui::Rect::from_min_size(art.min, art.size()),
+                                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                            None => {
+                                ui.painter()
+                                    .rect_filled(art, Rounding::same(10.0), theme::c_accent_fill());
+                                theme::paint_icon(ui.painter(), Icon::Music, art.center(), 34.0, theme::c_accent());
+                            }
+                        }
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&album.title).size(24.0).strong().color(theme::c_text()),
+                                )
                                 .wrap_mode(egui::TextWrapMode::Truncate),
-                        );
-                        let meta = if ru {
-                            format!(
-                                "{} · {} треков · {} · готово {}/{}",
-                                album.artist,
-                                album.tracks.len(),
-                                theme::fmt_time(album.duration_secs()),
-                                album.ready_count(),
-                                album.tracks.len()
-                            )
-                        } else {
-                            format!(
-                                "{} · {} tracks · {} · {}/{} ready",
-                                album.artist,
-                                album.tracks.len(),
-                                theme::fmt_time(album.duration_secs()),
-                                album.ready_count(),
-                                album.tracks.len()
-                            )
-                        };
-                        ui.label(RichText::new(meta).size(12.5).color(theme::c_text_dim()));
+                            );
+                            let meta = if ru {
+                                format!(
+                                    "{} · {} треков · {} · готово {}/{}",
+                                    album.artist,
+                                    album.tracks.len(),
+                                    theme::fmt_time(album.duration_secs()),
+                                    album.ready_count(),
+                                    album.tracks.len()
+                                )
+                            } else {
+                                format!(
+                                    "{} · {} tracks · {} · {}/{} ready",
+                                    album.artist,
+                                    album.tracks.len(),
+                                    theme::fmt_time(album.duration_secs()),
+                                    album.ready_count(),
+                                    album.tracks.len()
+                                )
+                            };
+                            ui.label(RichText::new(meta).size(12.5).color(theme::c_text_dim()));
+                        });
                     });
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
@@ -3476,6 +3675,7 @@ impl VibeDropApp {
         let lang = self.settings.language.clone();
         let mut clear = false;
         let mut play: Option<String> = None;
+        let mut restore: Option<usize> = None;
         page_header(
             ui,
             lang::t(&lang, "History"),
@@ -3505,7 +3705,7 @@ impl VibeDropApp {
             ui.push_id("history_scroll", |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 8.0;
-                    for item in &self.history {
+                    for (index, item) in self.history.iter().enumerate() {
                         let exists = self.library.get(&item.sound_id).is_some();
                         theme::frame_card().show(ui, |ui| {
                             ui.set_width(ui.available_width());
@@ -3515,7 +3715,7 @@ impl VibeDropApp {
                                     play = Some(item.sound_id.clone());
                                 }
                                 let color = if exists { theme::c_text() } else { theme::c_text_faint() };
-                                let name_width = (ui.available_width() - 130.0).max(100.0);
+                                let name_width = (ui.available_width() - 300.0).max(100.0);
                                 ui.allocate_ui_with_layout(
                                     vec2(name_width, 36.0),
                                     Layout::left_to_right(Align::Center),
@@ -3533,6 +3733,14 @@ impl VibeDropApp {
                                             .size(12.5)
                                             .color(theme::c_text_dim()),
                                     );
+                                    if !exists {
+                                        // The sound was removed from the library: offer to bring it
+                                        // back (from the file on disk or from its download address).
+                                        if theme::secondary_button(ui, lang::t(&lang, "Restore to My Sounds")).clicked()
+                                        {
+                                            restore = Some(index);
+                                        }
+                                    }
                                 });
                             });
                         });
@@ -3548,6 +3756,11 @@ impl VibeDropApp {
         }
         if let Some(id) = play {
             self.play_sound(&id);
+        }
+        if let Some(index) = restore {
+            if let Some(item) = self.history.get(index).cloned() {
+                self.restore_sound(&item);
+            }
         }
     }
 
@@ -3579,6 +3792,7 @@ impl VibeDropApp {
         let mut export_backup = false;
         let mut import_backup = false;
         let mut open_data_folder = false;
+        let mut clear_data = false;
         let mut check_music_tools = false;
 
         page_header(
@@ -4014,15 +4228,48 @@ impl VibeDropApp {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(lang::t(&lang, "Accent colour")).strong());
-                        let mut accent = self.settings.theme.accent.clone();
+                        // The field keeps the text that is being typed; the settings only receive
+                        // it once it is a complete colour, so a half-typed value is not lost.
+                        if self.accent_input.is_empty() && !self.settings.theme.accent.is_empty() {
+                            self.accent_input = self.settings.theme.accent.clone();
+                        }
                         let resp = ui.add(
-                            egui::TextEdit::singleline(&mut accent)
+                            egui::TextEdit::singleline(&mut self.accent_input)
                                 .desired_width(110.0)
                                 .hint_text("#2E9BE6"),
                         );
+                        let mut invalid = false;
                         if resp.changed() {
-                            self.settings.theme.accent = accent.trim().to_string();
-                            self.settings_dirty = true;
+                            let text = self.accent_input.trim().to_string();
+                            match theme::parse_color(&text) {
+                                Some(color) => {
+                                    let hex = format!(
+                                        "#{:02X}{:02X}{:02X}",
+                                        color.r(),
+                                        color.g(),
+                                        color.b()
+                                    );
+                                    self.accent_input = hex.clone();
+                                    self.settings.theme.accent = hex;
+                                    self.settings_dirty = true;
+                                }
+                                None => {
+                                    if text.is_empty() {
+                                        // An empty field means "use the built-in accent".
+                                        self.settings.theme.accent = String::new();
+                                        self.settings_dirty = true;
+                                    } else {
+                                        invalid = true;
+                                    }
+                                }
+                            }
+                        }
+                        if invalid {
+                            ui.label(
+                                RichText::new(lang::t(&lang, "Use a colour like #2E9BE6"))
+                                    .size(11.5)
+                                    .color(theme::c_warning()),
+                            );
                         }
                         for (name, color) in [
                             ("Blue", Color32::from_rgb(0x2E, 0x9B, 0xE6)),
@@ -4039,12 +4286,14 @@ impl VibeDropApp {
                                 )
                                 .clicked()
                             {
-                                self.settings.theme.accent = format!(
+                                let hex = format!(
                                     "#{:02X}{:02X}{:02X}",
                                     color.r(),
                                     color.g(),
                                     color.b()
                                 );
+                                self.accent_input = hex.clone();
+                                self.settings.theme.accent = hex;
                                 self.settings_dirty = true;
                             }
                         }
@@ -4359,6 +4608,9 @@ impl VibeDropApp {
                         if theme::secondary_button(ui, lang::t(&lang, "Open data folder")).clicked() {
                             open_data_folder = true;
                         }
+                        if theme::danger_button(ui, lang::t(&lang, "Clear data")).clicked() {
+                            clear_data = true;
+                        }
                     });
                 });
                 ui.add_space(8.0);
@@ -4423,6 +4675,9 @@ impl VibeDropApp {
         }
         if open_data_folder {
             self.open_data_folder();
+        }
+        if clear_data {
+            self.clear_data_dialog = true;
         }
         if let Some(role) = test {
             self.engine.test_tone(role);
@@ -4754,7 +5009,7 @@ impl VibeDropApp {
                     if lang::ru(&lang) {
                         ui.label(
                             RichText::new(
-                                "VibeDrop — независимый проект с открытым исходным кодом (лицензия Apache-2.0), вдохновлённый саундбордами в духе Soundpad. Soundpad — товарный знак соответствующего правообладателя; данный проект не аффилирован с ним.\n\nVB-CABLE — бесплатный виртуальный аудиокабель от VB-Audio; он не входит в комплект поставки VibeDrop и не связан с его разработчиками.",
+                                "VibeDrop — независимый проект с открытым исходным кодом (лицензия Apache-2.0), вдохновлённый саундбордами в духе Soundpad. Soundpad — товарный знак соответствующего правообладателя; данный проект не аффилирован с ним.\n\nVB-CABLE — бесплатный виртуальный аудиокабель от VB-Audio; он не входит в комплект поставки VibeDrop и не связан с его разработчиками.\n\nРаздел «Музыка» работает с двумя отдельными программами: yt-dlp (The Unlicense) и FFmpeg (GPL-2.0-or-later в поставляемой сборке). Они не входят в VibeDrop, запускаются как обычные дочерние процессы и поставляются рядом с программой в папке tools. Подробности — в THIRD_PARTY_NOTICES.md.",
                             )
                             .size(12.5)
                             .color(theme::c_text_dim()),
@@ -4762,7 +5017,7 @@ impl VibeDropApp {
                     } else {
                         ui.label(
                             RichText::new(
-                                "VibeDrop is an independent open-source project (Apache-2.0), inspired by soundboards in the spirit of Soundpad. Soundpad is a trademark of its respective owner; this project is not affiliated with it.\n\nVB-CABLE is a free virtual audio cable by VB-Audio; it is not bundled with VibeDrop and is not affiliated with its developers.",
+                                "VibeDrop is an independent open-source project (Apache-2.0), inspired by soundboards in the spirit of Soundpad. Soundpad is a trademark of its respective owner; this project is not affiliated with it.\n\nVB-CABLE is a free virtual audio cable by VB-Audio; it is not bundled with VibeDrop and is not affiliated with its developers.\n\nThe Music section works with two separate programs: yt-dlp (The Unlicense) and FFmpeg (GPL-2.0-or-later in the shipped build). They are not part of VibeDrop, run as ordinary child processes and are shipped next to the program in the tools folder. See THIRD_PARTY_NOTICES.md.",
                             )
                             .size(12.5)
                             .color(theme::c_text_dim()),
@@ -4775,6 +5030,70 @@ impl VibeDropApp {
             });
         if !open {
             self.about = false;
+        }
+    }
+
+    /// The confirmation window for "Clear data".
+    fn draw_clear_data_dialog(&mut self, ctx: &egui::Context) {
+        if !self.clear_data_dialog {
+            return;
+        }
+        let lang = self.settings.language.clone();
+        let mut open = true;
+        let mut confirmed = false;
+        let mut cancelled = false;
+        let mut confirm_text = String::new();
+        egui::Window::new(lang::t(&lang, "Clear data"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.set_width(400.0);
+                let text = if lang::ru(&lang) {
+                    "Будут удалены: библиотека звуков, история, альбомы музыки и кэш MP3, а также все копии файлов, которые VibeDrop хранил в своей папке. Настройки (устройства, горячие клавиши, внешний вид) останутся. Отменить это нельзя."
+                } else {
+                    "This removes: the sound library, the history, the music albums and the MP3 cache, plus every copy of a file that VibeDrop kept in its own folder. Your settings (devices, hotkeys, appearance) are kept. This cannot be undone."
+                };
+                ui.label(RichText::new(text).size(13.0).color(theme::c_text()));
+                ui.add_space(8.0);
+                // The word has to be typed, so that a stray click cannot wipe anything.
+                ui.label(
+                    RichText::new(lang::t(&lang, "Type DELETE to confirm"))
+                        .size(12.5)
+                        .color(theme::c_text_dim()),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut confirm_text)
+                        .desired_width(200.0)
+                        .hint_text("DELETE"),
+                );
+                ui.add_space(10.0);
+                let ready = confirm_text.trim().eq_ignore_ascii_case("delete");
+                ui.horizontal(|ui| {
+                    let button = theme::danger_button(ui, lang::t(&lang, "Delete everything"));
+                    if ready && button.clicked() {
+                        confirmed = true;
+                    } else if !ready {
+                        button.on_disabled_hover_text(lang::t(&lang, "Type DELETE to confirm"));
+                    }
+                    if theme::secondary_button(ui, lang::t(&lang, "Cancel")).clicked() {
+                        cancelled = true;
+                    }
+                });
+            });
+        if confirmed {
+            self.clear_all_data();
+            let text = if lang::ru(&lang) {
+                "Данные очищены."
+            } else {
+                "The data was cleared."
+            };
+            self.toast(ToastKind::Success, text);
+            self.clear_data_dialog = false;
+            return;
+        }
+        if !open || cancelled {
+            self.clear_data_dialog = false;
         }
     }
 
@@ -5265,6 +5584,7 @@ fn key_token(key: Key) -> Option<String> {
 impl eframe::App for VibeDropApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_events(ctx);
+        self.covers.poll();
         self.tick_music();
         self.handle_close(ctx);
         self.sync_presence();
@@ -5283,6 +5603,7 @@ impl eframe::App for VibeDropApp {
         self.draw_hotkey_dialog(ctx);
         self.draw_url_dialog(ctx);
         self.draw_about_dialog(ctx);
+        self.draw_clear_data_dialog(ctx);
         self.draw_toasts(ctx);
         self.handle_dropped_files(ctx);
 

@@ -10,6 +10,7 @@
 //! Playback itself uses the existing audio engine, so music is heard on the same headphones and
 //! microphone route as the soundboard, with the same master/route volumes and limiter.
 
+pub mod cover;
 pub mod download;
 pub mod library;
 pub mod player;

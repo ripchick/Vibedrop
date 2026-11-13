@@ -199,6 +199,17 @@ it is not included in this repository and VB-Audio is not affiliated with this p
 All other trademarks (Discord, PipeWire, PulseAudio, Linux, Windows) belong to their
 respective owners.
 
+The Music section talks to two separate programs that are **not** part of VibeDrop:
+
+* [yt-dlp](https://github.com/yt-dlp/yt-dlp) (The Unlicense) — finds an openly available copy
+  of a track;
+* [FFmpeg](https://ffmpeg.org) (GPL-2.0-or-later for the shipped build) — converts it to MP3.
+
+Both are started as ordinary child processes, are not modified and are not linked into
+VibeDrop. The release archives put them into `tools/` next to the program, so the Music
+section works right after the download. Their licenses and the exact builds are listed in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and in `tools/licenses/`.
+
 ## Contributors
 
 Thanks to everyone who helps VibeDrop — see [`.github/CONTRIBUTORS.md`](.github/CONTRIBUTORS.md):

@@ -58,6 +58,11 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Midnight" => "Полночь",
         "Light" => "Светлая",
         "Accent colour" => "Акцентный цвет",
+        "Use a colour like #2E9BE6" => "Введите цвет вида #2E9BE6",
+        "Clear data" => "Очистить данные",
+        "Delete everything" => "Удалить всё",
+        "Type DELETE to confirm" => "Введите DELETE для подтверждения",
+        "Restore to My Sounds" => "Вернуть в мои звуки",
         "Blue" => "Синий",
         "Teal" => "Бирюзовый",
         "Amber" => "Янтарный",
@@ -117,8 +122,6 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         // Sound list.
         "Add from URL" => "Добавить по ссылке",
         "Import" => "Импорт",
-        "Check files" => "Проверить файлы",
-        "Look for sound files that were moved or deleted" => "Искать файлы звуков, которые были перемещены или удалены",
         "Search sounds..." => "Поиск звуков...",
         "Local file" => "Локальный файл",
         "From URL" => "По ссылке",
@@ -132,6 +135,11 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "No favorites yet" => "В избранном пока ничего нет",
         "Click the star on a sound to pin it here." => "Нажмите звёздочку у звука, чтобы он появился здесь.",
         "Your library is empty" => "Библиотека пуста",
+        "Your library, settings and the recently played list are stored here and survive restarts and updates." =>
+            "Библиотека, настройки и список недавно воспроизведённого хранятся здесь и переживают перезапуск и обновление.",
+        "File import is not available on this platform yet." =>
+            "Импорт файлов пока недоступен на этой платформе.",
+        "Play" => "Воспроизвести",
         "Use Import, drop WAV/MP3/MP4 files here, or add a sound from a URL." => "Воспользуйтесь «Импортом», перетащите сюда файлы WAV/MP3/MP4 или добавьте звук по ссылке.",
         "Imported 1 sound" => "Импортирован 1 звук",
         // Row menu.
