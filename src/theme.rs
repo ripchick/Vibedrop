@@ -454,6 +454,25 @@ pub fn chip(ui: &mut Ui, text: &str, color: Color32, filled: bool) -> Response {
     .on_hover_cursor(CursorIcon::PointingHand)
 }
 
+/// Compact volume slider with an opaque black handle.
+///
+/// egui paints a slider handle with the current widget's `bg_fill`; on a dark panel the default
+/// translucent-looking handle let the blue track show through. Scoped visuals keep every other
+/// widget unchanged while the handle becomes solid black with a light rim.
+pub fn volume_slider(ui: &mut Ui, value: &mut f32, enabled: bool) -> Response {
+    ui.scope(|ui| {
+        let w = &mut ui.style_mut().visuals.widgets;
+        w.inactive.bg_fill = Color32::from_rgb(0x0A, 0x0A, 0x0A);
+        w.inactive.fg_stroke = Stroke::new(1.4_f32, c_text_dim());
+        w.hovered.bg_fill = Color32::BLACK;
+        w.hovered.fg_stroke = Stroke::new(1.6_f32, c_accent());
+        w.active.bg_fill = Color32::BLACK;
+        w.active.fg_stroke = Stroke::new(2.0_f32, c_accent());
+        ui.add_enabled(enabled, egui::Slider::new(value, 0.0..=1.0).show_value(false))
+    })
+    .inner
+}
+
 // ---- Icons -----------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -483,6 +502,12 @@ pub enum Icon {
     Reload,
     /// Wrench / settings shortcut.
     Wrench,
+    /// Music note (Music section).
+    Music,
+    /// Previous track.
+    Previous,
+    /// Next track.
+    Next,
 }
 
 fn star_points(c: Pos2, outer: f32) -> Vec<Pos2> {
@@ -708,6 +733,65 @@ pub fn paint_icon(p: &egui::Painter, icon: Icon, c: Pos2, s: f32, color: Color32
                 stroke,
             ));
             p.circle_stroke(Pos2::new(c.x + s * 0.22, c.y - s * 0.22), s * 0.20, stroke);
+        }
+        Icon::Music => {
+            // Stem with a filled note head and a small flag.
+            p.add(Shape::line_segment(
+                [
+                    Pos2::new(c.x + s * 0.10, c.y + s * 0.16),
+                    Pos2::new(c.x + s * 0.10, c.y - s * 0.40),
+                ],
+                stroke,
+            ));
+            p.add(Shape::convex_polygon(
+                vec![
+                    Pos2::new(c.x + s * 0.10, c.y - s * 0.40),
+                    Pos2::new(c.x + s * 0.38, c.y - s * 0.28),
+                    Pos2::new(c.x + s * 0.36, c.y - s * 0.04),
+                    Pos2::new(c.x + s * 0.10, c.y - s * 0.14),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+            p.circle_filled(Pos2::new(c.x - s * 0.10, c.y + s * 0.24), s * 0.17, color);
+        }
+        Icon::Previous => {
+            let h = s * 0.34;
+            for dx in [-0.16, 0.12] {
+                p.add(Shape::convex_polygon(
+                    vec![
+                        Pos2::new(c.x + dx * s + s * 0.16, c.y - h),
+                        Pos2::new(c.x + dx * s + s * 0.16, c.y + h),
+                        Pos2::new(c.x + dx * s - s * 0.10, c.y),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+            }
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x - s * 0.36, c.y), vec2(s * 0.08, h * 2.0)),
+                Rounding::same(s * 0.03),
+                color,
+            );
+        }
+        Icon::Next => {
+            let h = s * 0.34;
+            for dx in [-0.12, 0.16] {
+                p.add(Shape::convex_polygon(
+                    vec![
+                        Pos2::new(c.x + dx * s - s * 0.16, c.y - h),
+                        Pos2::new(c.x + dx * s - s * 0.16, c.y + h),
+                        Pos2::new(c.x + dx * s + s * 0.10, c.y),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+            }
+            p.rect_filled(
+                Rect::from_center_size(Pos2::new(c.x + s * 0.36, c.y), vec2(s * 0.08, h * 2.0)),
+                Rounding::same(s * 0.03),
+                color,
+            );
         }
     }
 }

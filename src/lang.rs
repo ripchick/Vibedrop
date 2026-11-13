@@ -255,6 +255,72 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Your microphone (an input device, optional)" => "Ваш микрофон (устройство ввода, необязательно)",
         "Each sound's own volume is in its \u{2022}\u{2022}\u{2022} menu. Final level = master x route x default x sound. Loud overlaps are limited instead of distorting." => "Громкость каждого звука — в его меню \u{2022}\u{2022}\u{2022}. Итоговый уровень = общая x маршрут x базовая x звук. Громкие наложения ограничиваются, а не искажаются.",
         "Register VibeDrop as the handler of soundpad:// and vibedrop:// links, so that clicking a \"play in Soundpad\" link on a website downloads the sound and plays it here. Only https links are downloaded." => "Зарегистрируйте VibeDrop как обработчик ссылок soundpad:// и vibedrop://, чтобы по клику на ссылку «play in Soundpad» на сайте звук скачивался и заигрывал здесь. Скачиваются только ссылки https.",
+        // Music section.
+        "Music" => "Музыка",
+        "Music settings" => "Настройки музыки",
+        "Import album" => "Импортировать альбом",
+        "Importing..." => "Импорт...",
+        "Clear cache" => "Очистить кэш",
+        "Paste a Spotify track or album link, e.g. https://open.spotify.com/album/..." => {
+            "Вставьте ссылку Spotify на трек или альбом, например https://open.spotify.com/album/..."
+        }
+        "Albums are grouped by release; all tracks are downloaded in the background through SoundCloud, then YouTube if needed." => {
+            "Альбомы группируются по релизу; все треки скачиваются в фоне через SoundCloud, при необходимости — через YouTube."
+        }
+        "Download tools are missing" => "Не хватает программ для скачивания",
+        "Not playing" => "Не играет",
+        "Loading..." => "Загрузка...",
+        "Playing" => "Играет",
+        "Paused" => "Пауза",
+        "Waiting for the download..." => "Ожидание скачивания...",
+        "Playback error" => "Ошибка воспроизведения",
+        "Repeat mode: Off, All, One" => "Режим повтора: выкл, все, один",
+        "Repeat: Off" => "Повтор: выкл",
+        "Repeat: All" => "Повтор: все",
+        "Repeat: One" => "Повтор: один",
+        "Next track" => "Следующий трек",
+        "Previous track" => "Предыдущий трек",
+        "Stop the music" => "Остановить музыку",
+        "No music yet" => "Музыки пока нет",
+        "Paste a Spotify track or album link above; the tracks are downloaded into the music cache and appear here." => {
+            "Вставьте выше ссылку Spotify на трек или альбом; треки скачаются в музыкальный кэш и появятся здесь."
+        }
+        "ALBUMS" => "АЛЬБОМЫ",
+        "Select an album" => "Выберите альбом",
+        "Remove album" => "Удалить альбом",
+        "Removes the album and its cached audio from VibeDrop." => "Удаляет альбом и его аудиокэш из VibeDrop.",
+        "Download missing" => "Докачать недостающие",
+        "Play all" => "Играть всё",
+        "Ready" => "Готово",
+        "Downloading" => "Качается",
+        "Error" => "Ошибка",
+        "Queued" => "В очереди",
+        "Downloading..." => "Скачивается...",
+        "Download failed" => "Не удалось скачать",
+        "Downloaded and ready to play." => "Скачано, можно играть.",
+        "Waiting for the download worker." => "Ждёт загрузчика.",
+        "Downloading now." => "Скачивается сейчас.",
+        "Click to try again." => "Нажмите, чтобы повторить.",
+        "Check tools" => "Проверить программы",
+        "yt-dlp and ffmpeg are ready." => "yt-dlp и ffmpeg готовы.",
+        "MUSIC" => "МУЗЫКА",
+        "yt-dlp path" => "Путь к yt-dlp",
+        "ffmpeg path" => "Путь к ffmpeg",
+        "Spotify Client ID" => "Spotify Client ID",
+        "Spotify Client Secret" => "Spotify Client Secret",
+        "Automatic (PATH)" => "Автоматически (PATH)",
+        "Optional; empty = public page" => "Необязательно; пусто = публичная страница",
+        "Optional; stored locally" => "Необязательно; хранится локально",
+        "Tools were not checked yet." => "Программы ещё не проверены.",
+        "The Music section imports Spotify tracks and albums and downloads their audio with yt-dlp. Leave the paths empty to find both programs on PATH; set them when a portable copy is used." => {
+            "Раздел «Музыка» импортирует треки и альбомы Spotify и скачивает их аудио через yt-dlp. Оставьте пути пустыми, чтобы искать программы в PATH; укажите их, если используете переносную копию."
+        }
+        "Environment variables SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are used when the fields are empty. A Client Credentials secret only reads the public catalogue; it is stored in settings.json on this PC." => {
+            "Если поля пусты, используются переменные среды SPOTIFY_CLIENT_ID и SPOTIFY_CLIENT_SECRET. Секрет Client Credentials даёт доступ только на чтение публичного каталога; он хранится в settings.json на этом компьютере."
+        }
+        "Tracks are played through the same headphones and microphone route as the soundboard." => {
+            "Треки играют через те же наушники и маршрут микрофона, что и звуки саундпада."
+        }
         _ => return None,
     })
 }

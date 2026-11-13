@@ -10,6 +10,7 @@ pub mod fsutil;
 pub mod hotkeys;
 pub mod lang;
 pub mod library;
+pub mod music;
 pub mod paths;
 pub mod protocol;
 pub mod settings;

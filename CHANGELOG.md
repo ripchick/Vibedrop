@@ -2,7 +2,22 @@
 
 ## Unreleased
 
+## 0.13.0
+
 ### Added
+- **Music section**: import a Spotify track or album by link and play it through the same
+  headphones + microphone routes as the soundboard.
+  * Spotify metadata without a user login: the public `open.spotify.com/embed/...` page by
+    default, or the Spotify Web API (Client Credentials) when a Client ID/Secret is configured
+    in Settings → Music / `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET`.
+  * Cascading download with `yt-dlp`: SoundCloud `scsearch1:` first (accepted only when the
+    duration is within 15 s of Spotify's), YouTube `ytsearch1:` with "official audio" as the
+    fallback (20 s tolerance); audio is converted to MP3 by `ffmpeg` in a separate cache.
+  * Per-track states (Queued / Downloading / Ready / Error with a retry), album grouping,
+    album queue, auto-advance, pause/resume/seek, and Repeat Off / All / One.
+  * Music up to 15 minutes per track (`MAX_MUSIC_SECS`), separate `music.json` + `music/`
+    cache, "Clear cache", and a tools check with install hints in Settings → Music.
+  * New guide: [`docs/MUSIC.md`](docs/MUSIC.md).
 - New application icon: a green five-bar equalizer on a dark rounded tile
   (the old placeholder read as random noise). Linux packages refresh the
   icon cache after install (`gtk-update-icon-cache`), so the new icon shows
@@ -28,6 +43,18 @@
   snippet, `~/.asoundrc`) and restart the user audio stack once.
 
 ### Fixed
+- Music: a long track is no longer stopped with a misleading "could not be decoded" error. The
+  engine decodes the whole file before it starts playing, so the limit for that step now grows
+  with the length of the track instead of being a fixed 45 seconds.
+- Header transport: the master-volume slider and its percentage no longer run off the right
+  edge, and the slider handle is solid black instead of letting the blue track show through.
+- Music page: a long album title no longer overlaps the "Play all / Download missing / Remove
+  album" buttons; the title and player line are truncated inside their own column.
+- Settings: the "Open the official VB-CABLE page" button now actually opens
+  <https://vb-audio.com/Cable/> (its click was never handled; links now use the same
+  platform opener as the data-folder button).
+- Sidebar footer: the sound/favorite counter no longer wraps into the Quit row when a music
+  track count was added.
 - Linux: the microphone route could silently sit on an ALSA alias of the desktop's default
   output ("pipewire", "default", "sysdefault:CARD=...", ...). Names differ, the physical
   device does not, so the name-based conflict check passed and the mixed-in voice played in

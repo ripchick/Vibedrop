@@ -72,6 +72,8 @@ pub struct Settings {
     pub theme: ThemeSettings,
     /// Behaviour of the sound table and the player.
     pub playback: PlaybackSettings,
+    /// Music section: external tool paths, optional Spotify Web API credentials and volume.
+    pub music: MusicSettings,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -146,6 +148,36 @@ impl Default for PlaybackSettings {
     }
 }
 
+/// Settings of the Music section. All paths are optional: an empty string means "find the
+/// program on PATH" and the two Spotify fields are empty when the public page is used.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct MusicSettings {
+    /// Explicit path to `yt-dlp` (a file or the folder that contains it).
+    pub yt_dlp_path: String,
+    /// Explicit path to `ffmpeg` (a file or the folder that contains it).
+    pub ffmpeg_path: String,
+    /// Spotify Web API Client ID. Empty = read the public album page instead.
+    pub spotify_client_id: String,
+    /// Spotify Web API Client Secret. Stored locally in plain text; a Client Credentials secret
+    /// only grants read access to the public catalogue.
+    pub spotify_client_secret: String,
+    /// Volume of the Music section, on top of the master and route volumes (0..=1).
+    pub volume: f32,
+}
+
+impl Default for MusicSettings {
+    fn default() -> Self {
+        Self {
+            yt_dlp_path: String::new(),
+            ffmpeg_path: String::new(),
+            spotify_client_id: String::new(),
+            spotify_client_secret: String::new(),
+            volume: 0.8,
+        }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -169,6 +201,7 @@ impl Default for Settings {
             delete_managed_copy_on_remove: false,
             theme: ThemeSettings::default(),
             playback: PlaybackSettings::default(),
+            music: MusicSettings::default(),
         }
     }
 }
@@ -252,6 +285,20 @@ impl Settings {
         };
         self.playback.fade_ms = self.playback.fade_ms.min(2000);
         self.playback.max_voices = self.playback.max_voices.clamp(1, 32);
+        // Music: trim paths/keys and keep the volume in range.
+        let trim = |s: &mut String| {
+            let t = s.trim();
+            if t.len() > 2048 {
+                *s = t.chars().take(2048).collect();
+            } else if t.len() != s.len() {
+                *s = t.to_string();
+            }
+        };
+        trim(&mut self.music.yt_dlp_path);
+        trim(&mut self.music.ffmpeg_path);
+        trim(&mut self.music.spotify_client_id);
+        trim(&mut self.music.spotify_client_secret);
+        self.music.volume = clamp_unit(self.music.volume, 0.8);
     }
 
     pub fn load(path: &Path) -> Result<(Settings, LoadStatus), StorageError> {

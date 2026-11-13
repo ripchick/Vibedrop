@@ -41,8 +41,12 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-/// Longest sound that will be decoded into memory.
+/// Longest soundboard sound that will be decoded into memory.
 pub const MAX_SOUND_SECS: f64 = 300.0;
+/// Longest music track (Music section) that will be decoded into memory. Music is decoded whole,
+/// like soundboard sounds, so this also bounds the memory a track can use (~170 MB at 48 kHz
+/// stereo for 15 minutes, plus one resampled copy per distinct output rate).
+pub const MAX_MUSIC_SECS: f64 = 900.0;
 /// How often the worker lists the audio devices.
 const SCAN_INTERVAL: Duration = Duration::from_secs(3);
 /// How often a lost or missing device is tried again.
@@ -299,6 +303,8 @@ struct PlayCmd {
     policy: RetriggerPolicy,
     allow_overlap: bool,
     ticket: u64,
+    /// Decoding limit for this sound; music tracks are allowed to be longer than soundboard sounds.
+    max_secs: f64,
 }
 
 enum Cmd {
@@ -397,6 +403,21 @@ impl Engine {
 
     /// Start a sound. Decoding happens on the worker thread; errors arrive as events.
     pub fn play(&self, sound_id: &str, path: &Path, gain: f32, policy: RetriggerPolicy, allow_overlap: bool) {
+        self.play_with_limit(sound_id, path, gain, policy, allow_overlap, MAX_SOUND_SECS);
+    }
+
+    /// Like [`Engine::play`], but allows a longer file (the Music section uses this). The limit is
+    /// checked after decoding, so a too-long file is rejected with an event instead of filling
+    /// memory without bound.
+    pub fn play_with_limit(
+        &self,
+        sound_id: &str,
+        path: &Path,
+        gain: f32,
+        policy: RetriggerPolicy,
+        allow_overlap: bool,
+        max_secs: f64,
+    ) {
         let ticket = self.shared.stops.ticket();
         let _ = self.tx.send(Cmd::Play(PlayCmd {
             sound_id: sound_id.to_string(),
@@ -405,6 +426,11 @@ impl Engine {
             policy,
             allow_overlap,
             ticket,
+            max_secs: if max_secs.is_finite() {
+                max_secs.max(1.0)
+            } else {
+                MAX_SOUND_SECS
+            },
         }));
     }
 
@@ -829,7 +855,7 @@ impl Worker {
             Cmd::Configure(cfg) => self.configure(&cfg),
             Cmd::Play(p) => self.play(p),
             Cmd::Preload { sound_id, path } => {
-                if let Err(message) = self.decoded_for(&sound_id, &path) {
+                if let Err(message) = self.decoded_for(&sound_id, &path, MAX_SOUND_SECS) {
                     self.error(Some(sound_id), message);
                 }
             }
@@ -1480,11 +1506,11 @@ impl Worker {
 
     // ---- Playback ------------------------------------------------------------------------------
 
-    fn decoded_for(&mut self, sound_id: &str, path: &Path) -> Result<Arc<DecodedAudio>, String> {
+    fn decoded_for(&mut self, sound_id: &str, path: &Path, max_secs: f64) -> Result<Arc<DecodedAudio>, String> {
         if let Some(d) = self.cache.get_decoded(path) {
             return Ok(d);
         }
-        let audio = Arc::new(decode_file(path)?);
+        let audio = Arc::new(decode_file_with_limit(path, max_secs)?);
         self.cache.insert_decoded(path, Arc::clone(&audio));
         let _ = self.evt.send(EngineEvent::Decoded {
             sound_id: sound_id.to_string(),
@@ -1510,7 +1536,7 @@ impl Worker {
         if stops.is_cancelled(&cmd.sound_id, cmd.ticket) {
             return;
         }
-        let audio = match self.decoded_for(&cmd.sound_id, &cmd.path) {
+        let audio = match self.decoded_for(&cmd.sound_id, &cmd.path, cmd.max_secs) {
             Ok(a) => a,
             Err(message) => {
                 self.error(Some(cmd.sound_id.clone()), message);
@@ -1662,8 +1688,18 @@ impl DecodedAudio {
     }
 }
 
-/// Decode a WAV or MP3 file into stereo f32 samples.
+/// Decode a WAV or MP3 file into stereo f32 samples (soundboard limit).
 pub fn decode_file(path: &Path) -> Result<DecodedAudio, String> {
+    decode_file_with_limit(path, MAX_SOUND_SECS)
+}
+
+/// Decode a WAV/MP3/MP4 file into stereo f32 samples, rejecting files longer than `max_secs`.
+pub fn decode_file_with_limit(path: &Path, max_secs: f64) -> Result<DecodedAudio, String> {
+    let max_secs = if max_secs.is_finite() {
+        max_secs.max(1.0)
+    } else {
+        MAX_SOUND_SECS
+    };
     use symphonia::core::audio::SampleBuffer;
     use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
     use symphonia::core::errors::Error as SymError;
@@ -1728,10 +1764,10 @@ pub fn decode_file(path: &Path) -> Result<DecodedAudio, String> {
                         }
                     }
                 }
-                if rate > 0 && (out.len() / CHANNELS) as f64 / rate as f64 > MAX_SOUND_SECS {
+                if rate > 0 && (out.len() / CHANNELS) as f64 / rate as f64 > max_secs {
                     return Err(format!(
-                        "The sound is longer than {} minutes, which is not supported",
-                        (MAX_SOUND_SECS / 60.0) as u32
+                        "The file is longer than {} minutes, which is not supported here",
+                        (max_secs / 60.0) as u32
                     ));
                 }
             }

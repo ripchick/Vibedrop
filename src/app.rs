@@ -24,6 +24,13 @@ use crate::library::{
     check_available, file_fingerprint, import_file, normalize_hotkey, remove_managed_file, validate_audio_file,
     ImportSource, Library, SoundEntry, MAX_ENTRY_VOLUME,
 };
+use crate::music::download::{
+    self as music_download, DownloadEvent as MusicDownloadEvent, DownloadJob, DownloadResult,
+};
+use crate::music::player::{PlaybackState, RepeatMode, MUSIC_SOUND_PREFIX};
+use crate::music::spotify::{self, FetchedEntity, SpotifyLink};
+use crate::music::tools::Tools;
+use crate::music::{MusicAlbum, MusicLibrary, MusicPlayer, MusicTrack, TrackStatus};
 use crate::paths::AppPaths;
 use crate::protocol::{parse_uri, parse_url_text, ProtocolCommand};
 use crate::settings::{CloseBehavior, RetriggerPolicy, Settings};
@@ -53,6 +60,8 @@ pub struct Startup {
     pub paths: AppPaths,
     pub settings: Settings,
     pub library: Library,
+    /// Albums, tracks and their download state (Music section).
+    pub music: MusicLibrary,
     /// Problems found while loading (corrupt files etc.), shown as notifications.
     pub notices: Vec<String>,
     /// A `soundpad://` link given on the command line.
@@ -80,17 +89,25 @@ struct PlayIndex {
 enum Page {
     Library,
     Favorites,
+    Music,
     History,
     Settings,
 }
 
 impl Page {
-    const ALL: [Page; 4] = [Page::Library, Page::Favorites, Page::History, Page::Settings];
+    const ALL: [Page; 5] = [
+        Page::Library,
+        Page::Favorites,
+        Page::Music,
+        Page::History,
+        Page::Settings,
+    ];
 
     fn title(self) -> &'static str {
         match self {
             Page::Library => "Library",
             Page::Favorites => "Favorites",
+            Page::Music => "Music",
             Page::History => "History",
             Page::Settings => "Settings",
         }
@@ -100,6 +117,7 @@ impl Page {
         match self {
             Page::Library => Icon::Library,
             Page::Favorites => Icon::Star,
+            Page::Music => Icon::Music,
             Page::History => Icon::History,
             Page::Settings => Icon::Settings,
         }
@@ -162,6 +180,33 @@ struct UrlDialog {
     focus: bool,
 }
 
+/// Result of reading a Spotify link on a background thread.
+struct MusicImportResult {
+    seq: u64,
+    link: SpotifyLink,
+    result: Result<FetchedEntity, String>,
+}
+
+/// Everything the Music page can ask the app to do after the UI has been drawn.
+enum MusicAction {
+    PlayAlbum(String, usize),
+    PlayTrack(String, String),
+    Toggle,
+    Next,
+    Previous,
+    Stop,
+    Repeat,
+    Seek(f32),
+    Volume(f32),
+    SelectAlbum(String),
+    DownloadAlbum(String),
+    RetryTrack(String, String),
+    RemoveAlbum(String),
+    ClearCache,
+    Import,
+    OpenSettings,
+}
+
 enum Action {
     Play(String),
     Stop(String),
@@ -221,6 +266,23 @@ pub struct VibeDropApp {
     dl_tx: Sender<DownloadEvent>,
     dl_rx: Receiver<DownloadEvent>,
 
+    // Music section.
+    music: MusicLibrary,
+    music_player: MusicPlayer,
+    music_tools: Tools,
+    /// Tool discovery runs on the first Music page open, not on every app start.
+    music_tools_checked: bool,
+    music_downloads: music_download::DownloadQueue,
+    music_url: String,
+    music_importing: bool,
+    music_import_error: Option<String>,
+    music_import_seq: u64,
+    music_import_tx: Sender<MusicImportResult>,
+    music_import_rx: Receiver<MusicImportResult>,
+    music_selected_album: Option<String>,
+    music_downloading: HashSet<String>,
+    music_dirty: bool,
+
     discord: crate::discord::DiscordPresence,
     applied_theme: crate::settings::ThemeSettings,
 
@@ -247,6 +309,7 @@ impl VibeDropApp {
             paths,
             settings,
             library,
+            music,
             notices,
             initial_uri,
             ipc_rx,
@@ -271,6 +334,10 @@ impl VibeDropApp {
         );
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
+        let (mi_tx, mi_rx) = unbounded::<MusicImportResult>();
+        let music_tools = Tools::default();
+        let music_downloads = music_download::start(paths.music_dir.clone(), music_tools.clone());
+        let music_selected_album = music.albums.first().map(|a| a.id.clone());
         let applied_theme = settings.theme.clone();
         let discord = crate::discord::DiscordPresence::start();
         let missing: HashSet<String> = library
@@ -306,6 +373,20 @@ impl VibeDropApp {
             next_download: 1,
             dl_tx,
             dl_rx,
+            music,
+            music_player: MusicPlayer::default(),
+            music_tools,
+            music_tools_checked: false,
+            music_downloads,
+            music_url: String::new(),
+            music_importing: false,
+            music_import_error: None,
+            music_import_seq: 0,
+            music_import_tx: mi_tx,
+            music_import_rx: mi_rx,
+            music_selected_album,
+            music_downloading: HashSet::new(),
+            music_dirty: false,
             discord,
             applied_theme,
             rename: None,
@@ -446,6 +527,21 @@ impl VibeDropApp {
         }
     }
 
+    fn save_music(&mut self) {
+        self.music_dirty = false;
+        if let Err(e) = self.music.save(&self.paths.music_file) {
+            let text = if lang::ru(&self.settings.language) {
+                format!(
+                    "Не удалось сохранить музыку: {}",
+                    lang::tx(&self.settings.language, &e.to_string())
+                )
+            } else {
+                format!("Could not save the music library: {e}")
+            };
+            self.toast(ToastKind::Error, text);
+        }
+    }
+
     /// Refresh the data used by the hotkey thread.
     fn sync_index(&self) {
         let mut g = lock(&self.play_index);
@@ -501,6 +597,19 @@ impl VibeDropApp {
             self.route_test = None;
             self.engine.configure(self.device_config());
         }
+        if before.music.yt_dlp_path != self.settings.music.yt_dlp_path
+            || before.music.ffmpeg_path != self.settings.music.ffmpeg_path
+        {
+            self.music_tools = Tools::discover(&self.settings.music);
+            self.music_tools_checked = true;
+            self.music_downloads.set_tools(self.music_tools.clone());
+        }
+        if (before.music.volume - self.settings.music.volume).abs() > f32::EPSILON
+            && self.music_player.state().is_active()
+        {
+            self.engine
+                .set_sound_gain(self.music_player.sound_id(), self.settings.music.volume);
+        }
         self.sync_index();
     }
 
@@ -522,10 +631,15 @@ impl VibeDropApp {
         for dl in self.downloads.values() {
             dl.handle.cancel();
         }
+        self.music_player.stop(&self.engine);
+        self.music_downloads.shutdown();
         self.engine.stop_all();
         self.engine.shutdown();
         if self.library_dirty {
             self.save_library();
+        }
+        if self.music_dirty {
+            self.save_music();
         }
         if self.settings_dirty {
             self.save_settings();
@@ -558,6 +672,7 @@ impl VibeDropApp {
             "version": 1,
             "library": serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&self.paths.library_file).unwrap_or_else(|_| "{}".into())).unwrap_or(serde_json::Value::Null),
             "settings": serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&self.paths.settings_file).unwrap_or_else(|_| "{}".into())).unwrap_or(serde_json::Value::Null),
+            "music": serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&self.paths.music_file).unwrap_or_else(|_| "{}".into())).unwrap_or(serde_json::Value::Null),
             "history": self.history.iter().map(|h| serde_json::json!({"sound_id": h.sound_id, "name": h.name, "at": h.at})).collect::<Vec<_>>(),
         });
         let path = self.paths.root().join(format!("vibedrop-backup-{}.json", unix_now()));
@@ -573,6 +688,10 @@ impl VibeDropApp {
         if let Some(lib) = data.get("library") {
             let lib_text = serde_json::to_string(lib).map_err(|e| e.to_string())?;
             crate::fsutil::write_atomic(&self.paths.library_file, lib_text.as_bytes()).map_err(|e| e.to_string())?;
+        }
+        if let Some(music) = data.get("music") {
+            let music_text = serde_json::to_string(music).map_err(|e| e.to_string())?;
+            crate::fsutil::write_atomic(&self.paths.music_file, music_text.as_bytes()).map_err(|e| e.to_string())?;
         }
         if let Some(set) = data.get("settings") {
             let set_text = serde_json::to_string(set).map_err(|e| e.to_string())?;
@@ -1004,6 +1123,345 @@ impl VibeDropApp {
         Ok(())
     }
 
+    // ---- Music: import, downloads, queue -------------------------------------------------------
+
+    /// Locate yt-dlp/ffmpeg the first time the user needs them, so app start stays instant.
+    fn ensure_music_tools(&mut self) {
+        if self.music_tools_checked {
+            return;
+        }
+        self.music_tools_checked = true;
+        self.music_tools = Tools::discover(&self.settings.music);
+        self.music_downloads.set_tools(self.music_tools.clone());
+    }
+
+    fn start_music_import(&mut self) {
+        if self.music_importing {
+            return;
+        }
+        let link = match spotify::parse_link(&self.music_url) {
+            Ok(link) => link,
+            Err(e) => {
+                self.music_import_error = Some(e);
+                return;
+            }
+        };
+        self.music_import_error = None;
+        self.music_importing = true;
+        self.music_import_seq += 1;
+        let seq = self.music_import_seq;
+        let tx = self.music_import_tx.clone();
+        let credentials = spotify::resolve_credentials(
+            &self.settings.music.spotify_client_id,
+            &self.settings.music.spotify_client_secret,
+        );
+        let spawned = std::thread::Builder::new()
+            .name("vibedrop-spotify".to_string())
+            .spawn(move || {
+                let result = spotify::fetch(&link, credentials.as_ref());
+                let _ = tx.send(MusicImportResult { seq, link, result });
+            });
+        if let Err(e) = spawned {
+            self.music_importing = false;
+            self.music_import_error = Some(format!("Could not start the Spotify request: {e}"));
+        }
+    }
+
+    fn add_music_entity(&mut self, entity: FetchedEntity, link: &SpotifyLink) {
+        let lang = self.settings.language.clone();
+        let canonical = link.canonical_url();
+        if let Some(existing) = self
+            .music
+            .albums
+            .iter()
+            .find(|a| a.source_url == canonical)
+            .map(|a| a.id.clone())
+        {
+            self.music_selected_album = Some(existing.clone());
+            self.toast(
+                ToastKind::Info,
+                if lang::ru(&lang) {
+                    "Этот альбом уже добавлен — докачиваем недостающие треки.".to_string()
+                } else {
+                    "This album is already in your music library. Downloading the missing tracks.".to_string()
+                },
+            );
+            self.queue_album_downloads(&existing);
+            return;
+        }
+        let album_title = if entity.title.trim().is_empty() {
+            "Untitled album".to_string()
+        } else {
+            entity.title.clone()
+        };
+        let mut album = MusicAlbum {
+            id: uuid::Uuid::new_v4().to_string(),
+            spotify_id: Some(link.id.clone()),
+            title: album_title.clone(),
+            artist: entity.artist.clone(),
+            cover_url: entity.cover_url.clone(),
+            source_url: canonical,
+            added_at: unix_now(),
+            tracks: Vec::new(),
+        };
+        for fetched in entity.tracks {
+            let track_album = if fetched.album.trim().is_empty() {
+                album_title.clone()
+            } else {
+                fetched.album
+            };
+            let mut track = MusicTrack::new(
+                fetched.title,
+                fetched.artist,
+                track_album,
+                fetched.duration_secs,
+                fetched.spotify_id,
+            );
+            track.status = TrackStatus::Queued;
+            album.tracks.push(track);
+        }
+        if album.tracks.is_empty() {
+            self.music_import_error = Some("This link did not contain any tracks.".to_string());
+            return;
+        }
+        let count = album.tracks.len();
+        let album_id = self.music.add_album(album);
+        self.music_selected_album = Some(album_id.clone());
+        self.music_dirty = true;
+        self.save_music();
+        self.music_url.clear();
+        self.toast(
+            ToastKind::Success,
+            if lang::ru(&lang) {
+                format!("Добавлено треков: {count}. Начинаю скачивание.")
+            } else {
+                format!("Added {count} track(s). Starting the download.")
+            },
+        );
+        self.queue_album_downloads(&album_id);
+    }
+
+    fn queue_album_downloads(&mut self, album_id: &str) {
+        self.ensure_music_tools();
+        let Some(album) = self.music.get(album_id) else { return };
+        let tracks: Vec<MusicTrack> = album.tracks.clone();
+        if !self.music_tools.ready() {
+            let problem = self
+                .music_tools
+                .problem()
+                .unwrap_or_else(|| "yt-dlp and ffmpeg are required to download music.".to_string());
+            let mut changed = false;
+            for track in tracks.iter().filter(|t| !t.available()) {
+                if !self.music_downloading.contains(&track.id) {
+                    changed |= self
+                        .music
+                        .set_status(&track.id, TrackStatus::Failed, Some(problem.clone()));
+                }
+            }
+            if changed {
+                self.music_dirty = true;
+                self.save_music();
+            }
+            self.toast(ToastKind::Error, problem);
+            return;
+        }
+        for track in tracks {
+            if !track.available() && !self.music_downloading.contains(&track.id) {
+                self.queue_music_download(&track);
+            }
+        }
+    }
+
+    fn queue_music_download(&mut self, track: &MusicTrack) {
+        if self.music_downloading.contains(&track.id) {
+            return;
+        }
+        if !self.music_tools.ready() {
+            let problem = self
+                .music_tools
+                .problem()
+                .unwrap_or_else(|| "yt-dlp and ffmpeg are required to download music.".to_string());
+            self.music
+                .set_status(&track.id, TrackStatus::Failed, Some(problem.clone()));
+            self.music_dirty = true;
+            self.toast(ToastKind::Error, problem);
+            return;
+        }
+        let dest = self.paths.music_dir.join(format!("{}.mp3", track.id));
+        // A retry replaces the file; drop any decoded audio of the old copy.
+        self.engine.forget_file(&dest);
+        self.music_downloading.insert(track.id.clone());
+        self.music
+            .set_status(&track.id, TrackStatus::Downloading, Some("searching".to_string()));
+        self.music_dirty = true;
+        self.music_downloads.enqueue(DownloadJob::from_track(track, dest));
+    }
+
+    fn retry_music_track(&mut self, track_id: &str) {
+        if self.music_downloading.contains(track_id) {
+            return;
+        }
+        let Some(track) = self.music.track(track_id).cloned() else {
+            return;
+        };
+        if track.available() {
+            return;
+        }
+        self.music.set_status(track_id, TrackStatus::Queued, None);
+        self.music_dirty = true;
+        self.queue_music_download(&track);
+    }
+
+    fn remove_music_album(&mut self, album_id: &str) {
+        if self.music_player.album_id() == Some(album_id) {
+            self.music_player.clear(&self.engine);
+        }
+        let Some(album) = self.music.remove(album_id) else {
+            return;
+        };
+        for track in &album.tracks {
+            self.music_downloading.remove(&track.id);
+            if let Some(path) = &track.path {
+                self.engine.forget_file(path);
+                // Only delete files that live directly in VibeDrop's own music cache.
+                if path.parent() == Some(self.paths.music_dir.as_path()) {
+                    if let Err(e) = std::fs::remove_file(path) {
+                        tracing::warn!("could not remove cached music file {}: {e}", path.display());
+                    }
+                }
+            }
+        }
+        if self.music_selected_album.as_deref() == Some(album_id) {
+            self.music_selected_album = self.music.albums.first().map(|a| a.id.clone());
+        }
+        self.music_dirty = true;
+        self.save_music();
+        let lang = self.settings.language.clone();
+        self.toast(
+            ToastKind::Info,
+            if lang::ru(&lang) {
+                format!("Удалено: «{}»", album.title)
+            } else {
+                format!("Removed \"{}\"", album.title)
+            },
+        );
+    }
+
+    fn clear_music_cache(&mut self) {
+        self.music_player.stop(&self.engine);
+        self.music_downloads.cancel_all();
+        self.music_downloading.clear();
+        for track in self.music.albums.iter().flat_map(|a| a.tracks.iter()) {
+            if let Some(path) = &track.path {
+                self.engine.forget_file(path);
+            }
+        }
+        match self.music.clear_cache(&self.paths.music_dir) {
+            Ok(removed) => {
+                self.music_dirty = true;
+                self.save_music();
+                let lang = self.settings.language.clone();
+                self.toast(
+                    ToastKind::Info,
+                    if lang::ru(&lang) {
+                        format!("Кэш музыки очищен: удалено файлов — {removed}.")
+                    } else {
+                        format!("Music cache cleared: {removed} file(s) removed.")
+                    },
+                );
+            }
+            Err(e) => self.toast(ToastKind::Error, e),
+        }
+    }
+
+    /// Keep the player and the download worker in sync. Called once per frame.
+    fn tick_music(&mut self) {
+        self.music_player.tick(&self.music, &self.engine, &self.settings);
+        let waiting = self.music_player.waiting_for_download(&self.music).cloned();
+        if let Some(track) = waiting {
+            if track.status == TrackStatus::Queued && !self.music_downloading.contains(&track.id) {
+                self.queue_music_download(&track);
+            }
+        }
+    }
+
+    fn apply_music_action(&mut self, action: MusicAction) {
+        let lang = self.settings.language.clone();
+        match action {
+            MusicAction::Import => self.start_music_import(),
+            MusicAction::OpenSettings => self.page = Page::Settings,
+            MusicAction::SelectAlbum(id) => {
+                if self
+                    .music_player
+                    .album_id()
+                    .is_some_and(|current| current != id && self.music_player.state().is_active())
+                {
+                    self.music_player.stop(&self.engine);
+                }
+                self.music_player.select_album(&self.music, &id);
+                self.music_selected_album = Some(id);
+            }
+            MusicAction::PlayAlbum(id, index) => {
+                self.music_selected_album = Some(id.clone());
+                self.queue_album_downloads(&id);
+                if let Err(e) = self
+                    .music_player
+                    .play_album(&self.music, &self.engine, &self.settings, &id, index)
+                {
+                    self.toast(ToastKind::Error, lang::tx(&lang, &e));
+                }
+            }
+            MusicAction::PlayTrack(album_id, track_id) => {
+                self.music_selected_album = Some(album_id.clone());
+                self.queue_album_downloads(&album_id);
+                if let Err(e) =
+                    self.music_player
+                        .play_track(&self.music, &self.engine, &self.settings, &album_id, &track_id)
+                {
+                    self.toast(ToastKind::Error, lang::tx(&lang, &e));
+                }
+            }
+            MusicAction::Toggle => {
+                if let Err(e) = self.music_player.toggle(&self.music, &self.engine, &self.settings) {
+                    self.toast(ToastKind::Error, lang::tx(&lang, &e));
+                }
+            }
+            MusicAction::Next => {
+                if let Err(e) = self.music_player.next(&self.music, &self.engine, &self.settings) {
+                    self.toast(ToastKind::Error, lang::tx(&lang, &e));
+                }
+            }
+            MusicAction::Previous => {
+                if let Err(e) = self.music_player.previous(&self.music, &self.engine, &self.settings) {
+                    self.toast(ToastKind::Error, lang::tx(&lang, &e));
+                }
+            }
+            MusicAction::Stop => self.music_player.stop(&self.engine),
+            MusicAction::Repeat => self.music_player.cycle_repeat(),
+            MusicAction::Seek(frac) => self.music_player.seek_frac(&self.engine, frac),
+            MusicAction::Volume(volume) => {
+                self.settings.music.volume = volume.clamp(0.0, 1.0);
+                self.settings_dirty = true;
+                if self.music_player.state().is_active() {
+                    self.engine
+                        .set_sound_gain(self.music_player.sound_id(), self.settings.music.volume);
+                }
+            }
+            MusicAction::DownloadAlbum(id) => {
+                self.queue_album_downloads(&id);
+                self.music_player
+                    .retry_waiting(&self.music, &self.engine, &self.settings);
+            }
+            MusicAction::RetryTrack(_album_id, track_id) => {
+                self.retry_music_track(&track_id);
+                self.music_player
+                    .retry_waiting(&self.music, &self.engine, &self.settings);
+            }
+            MusicAction::RemoveAlbum(id) => self.remove_music_album(&id),
+            MusicAction::ClearCache => self.clear_music_cache(),
+        }
+    }
+
     // ---- Downloads and links -----------------------------------------------------------------
 
     fn parse_target(text: &str) -> Result<Url, String> {
@@ -1055,9 +1513,90 @@ impl VibeDropApp {
 
     // ---- Event pumping -----------------------------------------------------------------------
 
+    /// Spotify results and music download events.
+    fn pump_music_events(&mut self, lang: &str) {
+        while let Ok(import) = self.music_import_rx.try_recv() {
+            if import.seq != self.music_import_seq {
+                continue; // a newer import replaced this request
+            }
+            self.music_importing = false;
+            match import.result {
+                Ok(entity) => self.add_music_entity(entity, &import.link),
+                Err(e) => {
+                    self.music_import_error = Some(e.clone());
+                    self.toast(ToastKind::Error, lang::tx(lang, &e));
+                }
+            }
+        }
+        for event in self.music_downloads.poll() {
+            match event {
+                MusicDownloadEvent::Started { track_id, stage } => {
+                    if self.music_downloading.contains(&track_id) {
+                        self.music.set_status(
+                            &track_id,
+                            TrackStatus::Downloading,
+                            Some(format!("Searching {}", stage.label())),
+                        );
+                    }
+                }
+                MusicDownloadEvent::Finished { track_id, result } => {
+                    self.music_downloading.remove(&track_id);
+                    match result {
+                        DownloadResult::Ready(file) => {
+                            self.music.set_ready(
+                                &track_id,
+                                file.path,
+                                Some(file.source),
+                                Some(file.source_url),
+                                file.duration_secs,
+                            );
+                            self.music_dirty = true;
+                            self.save_music();
+                            self.music_player
+                                .retry_waiting(&self.music, &self.engine, &self.settings);
+                        }
+                        DownloadResult::Cancelled => {
+                            self.music.set_status(&track_id, TrackStatus::Queued, None);
+                            self.music_dirty = true;
+                        }
+                        DownloadResult::Failed(error) => {
+                            let name = self
+                                .music
+                                .track(&track_id)
+                                .map(|t| {
+                                    if t.artist.trim().is_empty() {
+                                        t.title.clone()
+                                    } else {
+                                        format!("{} - {}", t.artist, t.title)
+                                    }
+                                })
+                                .unwrap_or_else(|| track_id.clone());
+                            self.music
+                                .set_status(&track_id, TrackStatus::Failed, Some(error.clone()));
+                            self.music_dirty = true;
+                            self.save_music();
+                            if self.music_player.current() == Some(track_id.as_str()) {
+                                self.toast(
+                                    ToastKind::Error,
+                                    if lang::ru(lang) {
+                                        format!("Не удалось скачать «{name}»: {error}")
+                                    } else {
+                                        format!("Could not download \"{name}\": {error}")
+                                    },
+                                );
+                            }
+                            self.music_player.on_download_failed(&track_id, error);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn pump_events(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language.clone();
         let ru = lang::ru(&lang);
+        self.pump_music_events(&lang);
         for event in self.engine.poll_events() {
             match event {
                 EngineEvent::Decoded {
@@ -1074,6 +1613,11 @@ impl VibeDropApp {
                     }
                 }
                 EngineEvent::Error { sound_id, message } => {
+                    if let Some(id) = sound_id.as_deref() {
+                        if id.starts_with(MUSIC_SOUND_PREFIX) {
+                            self.music_player.on_engine_error(id, message.clone());
+                        }
+                    }
                     let message = lang::tx(&lang, &message);
                     let text = match sound_id.as_deref().and_then(|id| self.library.get(id)) {
                         Some(entry) => format!("\"{}\": {message}", entry.name),
@@ -1224,6 +1768,9 @@ impl VibeDropApp {
         // Do not rewrite the file on every frame while a slider is being dragged.
         if self.library_dirty && !ctx.input(|i| i.pointer.any_down()) {
             self.save_library();
+        }
+        if self.music_dirty && !ctx.input(|i| i.pointer.any_down()) {
+            self.save_music();
         }
     }
 
@@ -1524,6 +2071,7 @@ impl VibeDropApp {
                     });
                     ui.menu_button(lang::t(&lang, "Playback"), |ui| {
                         if ui.button(lang::t(&lang, "Stop All")).clicked() {
+                            self.music_player.stop(&self.engine);
                             self.engine.stop_all();
                             ui.close_menu();
                         }
@@ -1572,7 +2120,7 @@ impl VibeDropApp {
                                 .size(12.5)
                                 .color(theme::c_text_dim()),
                         );
-                        let bar_w = (ui.available_width() - 210.0).max(120.0);
+                        let bar_w = (ui.available_width() - 330.0).max(120.0);
                         let (rect, resp) = ui.allocate_exact_size(vec2(bar_w, 6.0), Sense::click_and_drag());
                         ui.painter().rect_filled(rect, 3.0, theme::c_border());
                         let frac = match progress {
@@ -1595,7 +2143,7 @@ impl VibeDropApp {
                             18.0,
                             theme::c_accent(),
                         );
-                        ui.spacing_mut().slider_width = 120.0;
+                        ui.spacing_mut().slider_width = 100.0;
                         levels_changed |=
                             volume_row_inline(ui, lang::t(&lang, "Master"), &mut self.settings.master_volume, true);
                     });
@@ -1622,7 +2170,7 @@ impl VibeDropApp {
             }
         }
         if want_cable_page {
-            ctx.open_url(egui::OpenUrl::new_tab(crate::cable::VB_CABLE_PAGE));
+            Self::open_external_url(crate::cable::VB_CABLE_PAGE);
         }
         if want_about {
             self.about = true;
@@ -1746,6 +2294,7 @@ impl VibeDropApp {
             self.page = Page::Settings;
         }
         if stop_all {
+            self.music_player.stop(&self.engine);
             self.engine.stop_all();
         }
     }
@@ -1827,6 +2376,7 @@ impl VibeDropApp {
                 self.draw_alert_banner(ui);
                 match self.page {
                     Page::Library | Page::Favorites => self.draw_sound_page(ui),
+                    Page::Music => self.draw_music_page(ui),
                     Page::History => self.draw_history_page(ui),
                     Page::Settings => self.draw_settings_page(ui),
                 }
@@ -2264,6 +2814,26 @@ impl VibeDropApp {
 
     /// Push the current playback state to Discord (cheap, runs every frame).
     fn sync_presence(&mut self) {
+        // Music takes precedence: it is the long-running thing the user is listening to.
+        if self.music_player.state().is_active() {
+            if let Some(track) = self.music_player.current_track(&self.music) {
+                let name = if track.artist.trim().is_empty() {
+                    track.title.clone()
+                } else {
+                    format!("{} - {}", track.artist, track.title)
+                };
+                let playing = self.music_player.state() == PlaybackState::Playing;
+                let (pos, total) = self.music_player.time();
+                let state = if playing && total > 0.0 {
+                    Some(format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total)))
+                } else {
+                    Some(lang::t(&self.settings.language, "Music").to_string())
+                };
+                let started = playing.then(|| (unix_now() as i64).saturating_sub(pos.round() as i64));
+                self.discord.set(Some(name), state, started);
+                return;
+            }
+        }
         let now_name = self
             .now_playing
             .as_deref()
@@ -2285,6 +2855,619 @@ impl VibeDropApp {
             (None, _, _) => (None, None, None),
         };
         self.discord.set(details, state, started);
+    }
+
+    // ---- Drawing: music ----------------------------------------------------------------------
+
+    fn draw_music_page(&mut self, ui: &mut Ui) {
+        self.ensure_music_tools();
+        let lang = self.settings.language.clone();
+        let ru = lang::ru(&lang);
+        let mut action: Option<MusicAction> = None;
+        let total = self.music.track_count();
+        let ready = self.music.ready_count();
+        let cache_mb = self.music.cache_bytes() as f64 / (1024.0 * 1024.0);
+        let subtitle = if ru {
+            format!("{total} треков · готово {ready} · кэш {cache_mb:.1} МБ")
+        } else {
+            format!("{total} tracks · {ready} ready · {cache_mb:.1} MB cached")
+        };
+        let downloading = !self.music_downloading.is_empty();
+        let tools_ready = self.music_tools.ready();
+        let problem = self.music_tools.problem();
+        let import_error = self.music_import_error.clone();
+
+        page_header(ui, lang::t(&lang, "Music"), &subtitle, |ui| {
+            if downloading {
+                ui.spinner();
+            }
+            if theme::secondary_button(ui, lang::t(&lang, "Music settings")).clicked() {
+                action = Some(MusicAction::OpenSettings);
+            }
+            if total > 0 && theme::secondary_button(ui, lang::t(&lang, "Clear cache")).clicked() {
+                action = Some(MusicAction::ClearCache);
+            }
+        });
+        ui.add_space(10.0);
+
+        theme::frame_card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let width = (ui.available_width() - 210.0).max(180.0);
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.music_url)
+                        .hint_text(lang::t(
+                            &lang,
+                            "Paste a Spotify track or album link, e.g. https://open.spotify.com/album/...",
+                        ))
+                        .desired_width(width),
+                );
+                let enter = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                let button = if self.music_importing {
+                    lang::t(&lang, "Importing...")
+                } else {
+                    lang::t(&lang, "Import album")
+                };
+                if ui
+                    .add_enabled(
+                        !self.music_importing,
+                        egui::Button::new(RichText::new(button).strong()),
+                    )
+                    .clicked()
+                    || (enter && !self.music_importing)
+                {
+                    action = Some(MusicAction::Import);
+                }
+            });
+            if let Some(error) = &import_error {
+                ui.label(
+                    RichText::new(lang::tx(&lang, error))
+                        .size(12.5)
+                        .color(theme::c_danger()),
+                );
+            } else {
+                ui.label(
+                    RichText::new(lang::t(
+                        &lang,
+                        "Albums are grouped by release; all tracks are downloaded in the background through SoundCloud, then YouTube if needed.",
+                    ))
+                    .size(12.0)
+                    .color(theme::c_text_faint()),
+                );
+            }
+        });
+
+        if !tools_ready {
+            ui.add_space(8.0);
+            theme::frame_card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(lang::t(&lang, "Download tools are missing"))
+                            .strong()
+                            .color(theme::c_warning()),
+                    );
+                    if theme::secondary_button(ui, lang::t(&lang, "Music settings")).clicked() {
+                        action = Some(MusicAction::OpenSettings);
+                    }
+                });
+                if let Some(problem) = &problem {
+                    ui.label(
+                        RichText::new(lang::tx(&lang, problem))
+                            .size(12.5)
+                            .color(theme::c_text_dim()),
+                    );
+                }
+            });
+        }
+        ui.add_space(8.0);
+
+        if let Some(a) = self.draw_music_player(ui) {
+            action = Some(a);
+        }
+        ui.add_space(8.0);
+        if let Some(a) = self.draw_music_albums(ui) {
+            action = Some(a);
+        }
+
+        if let Some(action) = action {
+            self.apply_music_action(action);
+        }
+    }
+
+    fn draw_music_player(&mut self, ui: &mut Ui) -> Option<MusicAction> {
+        let lang = self.settings.language.clone();
+        let track = self.music_player.current_track(&self.music).cloned();
+        let album = self.music_player.album_id().and_then(|id| self.music.get(id)).cloned();
+        let state = self.music_player.state();
+        let repeat = self.music_player.repeat();
+        let (pos, total) = self.music_player.time();
+        let error = self.music_player.error().map(str::to_string);
+        let has_queue = self.music_player.queue_len() > 0;
+        let mut action: Option<MusicAction> = None;
+        let mut volume = self.settings.music.volume;
+        let mut seek: Option<f32> = None;
+
+        let state_text = match state {
+            PlaybackState::Idle => lang::t(&lang, "Not playing").to_string(),
+            PlaybackState::Loading => lang::t(&lang, "Loading...").to_string(),
+            PlaybackState::Playing => lang::t(&lang, "Playing").to_string(),
+            PlaybackState::Paused => lang::t(&lang, "Paused").to_string(),
+            PlaybackState::Buffering => lang::t(&lang, "Waiting for the download...").to_string(),
+            PlaybackState::Error => lang::t(&lang, "Playback error").to_string(),
+        };
+
+        theme::deck_card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (art, _) = ui.allocate_exact_size(vec2(50.0, 50.0), Sense::hover());
+                ui.painter()
+                    .rect_filled(art, Rounding::same(10.0), theme::c_accent_fill());
+                theme::paint_icon(
+                    ui.painter(),
+                    Icon::Music,
+                    art.center(),
+                    26.0,
+                    if track.is_some() {
+                        theme::c_accent()
+                    } else {
+                        theme::c_text_faint()
+                    },
+                );
+                let info_w = (ui.available_width() - 340.0).max(140.0);
+                ui.allocate_ui_with_layout(vec2(info_w, 50.0), Layout::top_down(Align::Min), |ui| {
+                    ui.set_width(info_w);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let title = track
+                        .as_ref()
+                        .map(|t| t.title.clone())
+                        .unwrap_or_else(|| lang::t(&lang, "Nothing playing").to_string());
+                    ui.add(
+                        egui::Label::new(RichText::new(title).size(16.0).strong().color(theme::c_text()))
+                            .wrap_mode(egui::TextWrapMode::Truncate),
+                    );
+                    let meta = match (&track, &album) {
+                        (Some(t), Some(a)) => {
+                            let mut parts: Vec<String> = Vec::new();
+                            if !t.artist.trim().is_empty() {
+                                parts.push(t.artist.clone());
+                            }
+                            if !a.title.trim().is_empty() {
+                                parts.push(a.title.clone());
+                            }
+                            parts.push(state_text.clone());
+                            parts.join(" · ")
+                        }
+                        _ => state_text.clone(),
+                    };
+                    ui.add(
+                        egui::Label::new(RichText::new(meta).size(12.5).color(if state == PlaybackState::Error {
+                            theme::c_danger()
+                        } else {
+                            theme::c_text_dim()
+                        }))
+                        .wrap_mode(egui::TextWrapMode::Truncate),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let label = lang::t(&lang, repeat.label());
+                    if theme::chip(
+                        ui,
+                        label,
+                        if repeat == RepeatMode::Off {
+                            theme::c_text_dim()
+                        } else {
+                            theme::c_accent()
+                        },
+                        repeat != RepeatMode::Off,
+                    )
+                    .on_hover_text(lang::t(&lang, "Repeat mode: Off, All, One"))
+                    .clicked()
+                    {
+                        action = Some(MusicAction::Repeat);
+                    }
+                    ui.spacing_mut().slider_width = 80.0;
+                    if theme::volume_slider(ui, &mut volume, true).changed() {
+                        action = Some(MusicAction::Volume(volume));
+                    }
+                    let (icon_rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+                    theme::paint_icon(
+                        ui.painter(),
+                        Icon::Volume,
+                        icon_rect.center(),
+                        17.0,
+                        theme::c_text_faint(),
+                    );
+                    if theme::icon_button(ui, Icon::Next, 18.0, false)
+                        .on_hover_text(lang::t(&lang, "Next track"))
+                        .clicked()
+                    {
+                        action = Some(MusicAction::Next);
+                    }
+                    let play_icon = if matches!(state, PlaybackState::Playing | PlaybackState::Loading) {
+                        Icon::Pause
+                    } else {
+                        Icon::Play
+                    };
+                    if theme::round_button(ui, play_icon, 40.0, true, has_queue).clicked() {
+                        action = Some(MusicAction::Toggle);
+                    }
+                    if theme::icon_button(ui, Icon::Previous, 18.0, false)
+                        .on_hover_text(lang::t(&lang, "Previous track"))
+                        .clicked()
+                    {
+                        action = Some(MusicAction::Previous);
+                    }
+                    if theme::icon_button(ui, Icon::Stop, 16.0, false)
+                        .on_hover_text(lang::t(&lang, "Stop the music"))
+                        .clicked()
+                    {
+                        action = Some(MusicAction::Stop);
+                    }
+                });
+            });
+
+            if let Some(error) = &error {
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(lang::tx(&lang, error))
+                        .size(12.0)
+                        .color(theme::c_danger()),
+                );
+            }
+
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(theme::fmt_time(pos))
+                        .monospace()
+                        .size(12.0)
+                        .color(theme::c_text_dim()),
+                );
+                let bar_w = (ui.available_width() - 96.0).max(80.0);
+                let (rect, response) = ui.allocate_exact_size(vec2(bar_w, 7.0), Sense::click_and_drag());
+                ui.painter().rect_filled(rect, 3.5, theme::c_border());
+                let frac = if total > 0.0 {
+                    (pos / total).clamp(0.0, 1.0) as f32
+                } else {
+                    0.0
+                };
+                let filled = egui::Rect::from_min_size(rect.min, vec2(rect.width() * frac, 7.0));
+                ui.painter().rect_filled(filled, 3.5, theme::c_accent());
+                if has_queue && (response.clicked() || response.dragged()) {
+                    if let Some(pointer) = response.interact_pointer_pos() {
+                        seek = Some(((pointer.x - rect.min.x) / rect.width()).clamp(0.0, 1.0));
+                    }
+                }
+                ui.label(
+                    RichText::new(theme::fmt_time(total))
+                        .monospace()
+                        .size(12.0)
+                        .color(theme::c_text_dim()),
+                );
+            });
+        });
+
+        if let Some(frac) = seek {
+            action = Some(MusicAction::Seek(frac));
+        }
+        action
+    }
+
+    fn draw_music_albums(&mut self, ui: &mut Ui) -> Option<MusicAction> {
+        let lang = self.settings.language.clone();
+        let ru = lang::ru(&lang);
+        let albums = self.music.albums.clone();
+        if albums.is_empty() {
+            ui.add_space(30.0);
+            theme::frame_card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new(lang::t(&lang, "No music yet"))
+                            .size(22.0)
+                            .strong()
+                            .color(theme::c_text()),
+                    );
+                    ui.label(
+                        RichText::new(lang::t(
+                            &lang,
+                            "Paste a Spotify track or album link above; the tracks are downloaded into the music cache and appear here.",
+                        ))
+                        .color(theme::c_text_dim()),
+                    );
+                });
+            });
+            return None;
+        }
+        let selected = self
+            .music_selected_album
+            .clone()
+            .filter(|id| albums.iter().any(|a| &a.id == id))
+            .or_else(|| albums.first().map(|a| a.id.clone()));
+        let selected_album = selected
+            .as_ref()
+            .and_then(|id| albums.iter().find(|a| &a.id == id))
+            .cloned();
+        let current_album = self.music_player.album_id().map(str::to_string);
+        let current_track = self.music_player.current().map(str::to_string);
+        let playing = matches!(
+            self.music_player.state(),
+            PlaybackState::Playing | PlaybackState::Loading
+        );
+        let mut action: Option<MusicAction> = None;
+
+        let available = ui.available_size();
+        ui.horizontal_top(|ui| {
+            let left_w = (available.x * 0.34).clamp(220.0, 290.0);
+            ui.allocate_ui_with_layout(
+                vec2(left_w, available.y.max(200.0)),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(left_w);
+                    ui.label(
+                        RichText::new(lang::t(&lang, "ALBUMS"))
+                            .size(11.0)
+                            .strong()
+                            .color(theme::c_text_faint()),
+                    );
+                    egui::ScrollArea::vertical()
+                        .id_source("music_album_list")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 5.0;
+                            for album in &albums {
+                                let is_selected = selected.as_deref() == Some(album.id.as_str());
+                                let is_current = current_album.as_deref() == Some(album.id.as_str());
+                                theme::sound_card(is_current).show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.horizontal(|ui| {
+                                        let (art, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
+                                        ui.painter().rect_filled(
+                                            art,
+                                            Rounding::same(7.0),
+                                            if is_current {
+                                                theme::c_accent_dim()
+                                            } else {
+                                                theme::c_accent_fill()
+                                            },
+                                        );
+                                        theme::paint_icon(
+                                            ui.painter(),
+                                            Icon::Music,
+                                            art.center(),
+                                            18.0,
+                                            theme::c_accent(),
+                                        );
+                                        ui.vertical(|ui| {
+                                            ui.spacing_mut().item_spacing.y = 0.0;
+                                            let color = if is_selected {
+                                                theme::c_accent()
+                                            } else {
+                                                theme::c_text()
+                                            };
+                                            if ui
+                                                .add(
+                                                    egui::Label::new(
+                                                        RichText::new(&album.title).size(13.5).strong().color(color),
+                                                    )
+                                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                                    .sense(Sense::click()),
+                                                )
+                                                .clicked()
+                                            {
+                                                action = Some(MusicAction::SelectAlbum(album.id.clone()));
+                                            }
+                                            let meta = if ru {
+                                                format!("{} · {} треков", album.artist, album.tracks.len())
+                                            } else {
+                                                format!("{} · {} tracks", album.artist, album.tracks.len())
+                                            };
+                                            ui.label(RichText::new(meta).size(11.5).color(theme::c_text_faint()));
+                                        });
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            if theme::round_button(ui, Icon::Play, 28.0, true, !album.tracks.is_empty())
+                                                .clicked()
+                                            {
+                                                action = Some(MusicAction::PlayAlbum(album.id.clone(), 0));
+                                            }
+                                        });
+                                    });
+                                });
+                            }
+                        });
+                },
+            );
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+            let right_w = ui.available_width();
+            ui.allocate_ui_with_layout(
+                vec2(right_w, available.y.max(200.0)),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(right_w);
+                    let Some(album) = &selected_album else {
+                        ui.label(RichText::new(lang::t(&lang, "Select an album")).color(theme::c_text_dim()));
+                        return;
+                    };
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.add(
+                            egui::Label::new(RichText::new(&album.title).size(24.0).strong().color(theme::c_text()))
+                                .wrap_mode(egui::TextWrapMode::Truncate),
+                        );
+                        let meta = if ru {
+                            format!(
+                                "{} · {} треков · {} · готово {}/{}",
+                                album.artist,
+                                album.tracks.len(),
+                                theme::fmt_time(album.duration_secs()),
+                                album.ready_count(),
+                                album.tracks.len()
+                            )
+                        } else {
+                            format!(
+                                "{} · {} tracks · {} · {}/{} ready",
+                                album.artist,
+                                album.tracks.len(),
+                                theme::fmt_time(album.duration_secs()),
+                                album.ready_count(),
+                                album.tracks.len()
+                            )
+                        };
+                        ui.label(RichText::new(meta).size(12.5).color(theme::c_text_dim()));
+                    });
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if theme::secondary_button(ui, lang::t(&lang, "Remove album"))
+                                .on_hover_text(lang::t(&lang, "Removes the album and its cached audio from VibeDrop."))
+                                .clicked()
+                            {
+                                action = Some(MusicAction::RemoveAlbum(album.id.clone()));
+                            }
+                            if theme::secondary_button(ui, lang::t(&lang, "Download missing")).clicked() {
+                                action = Some(MusicAction::DownloadAlbum(album.id.clone()));
+                            }
+                            if theme::primary_button(ui, lang::t(&lang, "Play all")).clicked() {
+                                action = Some(MusicAction::PlayAlbum(album.id.clone(), 0));
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                    egui::ScrollArea::vertical()
+                        .id_source("music_track_list")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 5.0;
+                            for (number, track) in album.tracks.iter().enumerate() {
+                                let is_current = current_track.as_deref() == Some(track.id.as_str());
+                                let track_playing = is_current && playing;
+                                theme::sound_card(track_playing).show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.horizontal(|ui| {
+                                        ui.set_min_height(38.0);
+                                        if track_playing {
+                                            let (bar, _) = ui.allocate_exact_size(vec2(3.0, 32.0), Sense::hover());
+                                            ui.painter().rect_filled(bar, Rounding::same(2.0), theme::c_accent());
+                                        }
+                                        ui.add_sized(
+                                            vec2(24.0, 20.0),
+                                            egui::Label::new(
+                                                RichText::new((number + 1).to_string())
+                                                    .size(12.0)
+                                                    .color(theme::c_text_faint()),
+                                            ),
+                                        );
+                                        let icon = if track_playing { Icon::Pause } else { Icon::Play };
+                                        if theme::round_button(ui, icon, 30.0, track_playing, true).clicked() {
+                                            action = Some(if is_current {
+                                                MusicAction::Toggle
+                                            } else {
+                                                MusicAction::PlayTrack(album.id.clone(), track.id.clone())
+                                            });
+                                        }
+                                        let name_w = (ui.available_width() - 230.0).max(100.0);
+                                        ui.allocate_ui_with_layout(
+                                            vec2(name_w, 38.0),
+                                            Layout::top_down(Align::Min),
+                                            |ui| {
+                                                ui.set_width(name_w);
+                                                ui.spacing_mut().item_spacing.y = 0.0;
+                                                let color = if track_playing {
+                                                    theme::c_accent()
+                                                } else {
+                                                    theme::c_text()
+                                                };
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(&track.title).size(14.0).strong().color(color),
+                                                    )
+                                                    .wrap_mode(egui::TextWrapMode::Truncate),
+                                                );
+                                                let meta = if track.status == TrackStatus::Downloading {
+                                                    lang::t(&lang, "Downloading...").to_string()
+                                                } else if track.status == TrackStatus::Failed {
+                                                    track.detail.clone().unwrap_or_else(|| {
+                                                        lang::t(&lang, "Download failed").to_string()
+                                                    })
+                                                } else if !track.artist.trim().is_empty() {
+                                                    match &track.source {
+                                                        Some(source) if track.status == TrackStatus::Ready => {
+                                                            format!("{} · {source}", track.artist)
+                                                        }
+                                                        _ => track.artist.clone(),
+                                                    }
+                                                } else {
+                                                    track.album.clone()
+                                                };
+                                                ui.add(
+                                                    egui::Label::new(RichText::new(meta).size(11.5).color(
+                                                        if track.status == TrackStatus::Failed {
+                                                            theme::c_danger()
+                                                        } else {
+                                                            theme::c_text_faint()
+                                                        },
+                                                    ))
+                                                    .wrap_mode(egui::TextWrapMode::Truncate),
+                                                );
+                                            },
+                                        );
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            let (text, color, filled) = match track.status {
+                                                TrackStatus::Ready => {
+                                                    (lang::t(&lang, "Ready"), theme::c_accent_alt(), true)
+                                                }
+                                                TrackStatus::Downloading => {
+                                                    (lang::t(&lang, "Downloading"), theme::c_accent(), false)
+                                                }
+                                                TrackStatus::Failed => {
+                                                    (lang::t(&lang, "Error"), theme::c_danger(), false)
+                                                }
+                                                TrackStatus::Queued => {
+                                                    (lang::t(&lang, "Queued"), theme::c_text_dim(), false)
+                                                }
+                                            };
+                                            let chip = theme::chip(ui, text, color, filled);
+                                            let tip = track.detail.clone().unwrap_or_else(|| match track.status {
+                                                TrackStatus::Ready => {
+                                                    lang::t(&lang, "Downloaded and ready to play.").to_string()
+                                                }
+                                                TrackStatus::Queued => {
+                                                    lang::t(&lang, "Waiting for the download worker.").to_string()
+                                                }
+                                                TrackStatus::Downloading => {
+                                                    lang::t(&lang, "Downloading now.").to_string()
+                                                }
+                                                TrackStatus::Failed => {
+                                                    lang::t(&lang, "Click to try again.").to_string()
+                                                }
+                                            });
+                                            let clicked = chip.on_hover_text(tip).clicked();
+                                            if clicked
+                                                && matches!(track.status, TrackStatus::Queued | TrackStatus::Failed)
+                                            {
+                                                action =
+                                                    Some(MusicAction::RetryTrack(album.id.clone(), track.id.clone()));
+                                            }
+                                            ui.label(
+                                                RichText::new(theme::fmt_time(track.duration_secs))
+                                                    .monospace()
+                                                    .size(11.5)
+                                                    .color(theme::c_text_faint()),
+                                            );
+                                        });
+                                    });
+                                });
+                            }
+                            ui.add_space(6.0);
+                        });
+                },
+            );
+        });
+        action
     }
 
     // ---- Drawing: history --------------------------------------------------------------------
@@ -2396,6 +3579,7 @@ impl VibeDropApp {
         let mut export_backup = false;
         let mut import_backup = false;
         let mut open_data_folder = false;
+        let mut check_music_tools = false;
 
         page_header(
             ui,
@@ -2679,7 +3863,14 @@ impl VibeDropApp {
                             for line in mic_setup_steps(&lang) {
                                 ui.label(RichText::new(line).size(12.5).color(theme::c_text_dim()));
                             }
-                            ui.hyperlink_to(lang::t(&lang, "VB-CABLE (free virtual audio cable)"), "https://vb-audio.com/Cable/");
+                            if theme::secondary_button(
+                                ui,
+                                lang::t(&lang, "VB-CABLE (free virtual audio cable)"),
+                            )
+                            .clicked()
+                            {
+                                Self::open_external_url(crate::cable::VB_CABLE_PAGE);
+                            }
                         });
                 });
 
@@ -2719,6 +3910,87 @@ impl VibeDropApp {
                                 .color(theme::c_text_faint()),
                         );
                     }
+                });
+
+                // Music: external tools and optional Spotify Web API credentials.
+                theme::frame_card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    theme::section_title(ui, lang::t(&lang, "MUSIC"));
+                    ui.label(
+                        RichText::new(lang::t(
+                            &lang,
+                            "The Music section imports Spotify tracks and albums and downloads their audio with yt-dlp. Leave the paths empty to find both programs on PATH; set them when a portable copy is used.",
+                        ))
+                        .color(theme::c_text_dim()),
+                    );
+                    egui::Grid::new("music_settings_grid")
+                        .num_columns(2)
+                        .spacing([24.0, 10.0])
+                        .show(ui, |ui| {
+                            ui.label(lang::t(&lang, "yt-dlp path"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.settings.music.yt_dlp_path)
+                                    .hint_text("Automatic (PATH)")
+                                    .desired_width(420.0),
+                            );
+                            ui.end_row();
+
+                            ui.label(lang::t(&lang, "ffmpeg path"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.settings.music.ffmpeg_path)
+                                    .hint_text("Automatic (PATH)")
+                                    .desired_width(420.0),
+                            );
+                            ui.end_row();
+
+                            ui.label(lang::t(&lang, "Spotify Client ID"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.settings.music.spotify_client_id)
+                                    .hint_text("Optional; empty = public page")
+                                    .desired_width(420.0),
+                            );
+                            ui.end_row();
+
+                            ui.label(lang::t(&lang, "Spotify Client Secret"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.settings.music.spotify_client_secret)
+                                    .password(true)
+                                    .hint_text("Optional; stored locally")
+                                    .desired_width(420.0),
+                            );
+                            ui.end_row();
+                        });
+                    let status = if !self.music_tools_checked {
+                        (
+                            theme::c_text_faint(),
+                            lang::t(&lang, "Tools were not checked yet.").to_string(),
+                        )
+                    } else {
+                        match (
+                            self.music_tools.yt_dlp_version.as_deref(),
+                            self.music_tools.ffmpeg_version.as_deref(),
+                        ) {
+                            (Some(yt), Some(ff)) => (theme::c_accent(), format!("yt-dlp {yt} · ffmpeg {ff}")),
+                            _ => (
+                                theme::c_warning(),
+                                self.music_tools.problem().unwrap_or_else(|| {
+                                    lang::t(&lang, "Tools were not checked yet.").to_string()
+                                }),
+                            ),
+                        }
+                    };
+                    ui.label(RichText::new(status.1).size(12.5).color(status.0));
+                    if theme::secondary_button(ui, lang::t(&lang, "Check tools")).clicked() {
+                        check_music_tools = true;
+                    }
+                    ui.label(
+                        RichText::new(lang::t(
+                            &lang,
+                            "Environment variables SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are used when the fields are empty. A Client Credentials secret only reads the public catalogue; it is stored in settings.json on this PC.",
+                        ))
+                        .size(12.0)
+                        .color(theme::c_text_faint()),
+                    );
                 });
 
                 // Appearance: theme, accent, radius, font size and panel visibility.
@@ -3097,6 +4369,22 @@ impl VibeDropApp {
             self.engine.rescan_devices();
             self.engine.configure(self.device_config());
         }
+        if check_music_tools {
+            self.music_tools = Tools::discover(&self.settings.music);
+            self.music_tools_checked = true;
+            self.music_downloads.set_tools(self.music_tools.clone());
+            let (kind, text) = match &self.music_tools.problem() {
+                None => (
+                    ToastKind::Success,
+                    lang::t(&lang, "yt-dlp and ffmpeg are ready.").to_string(),
+                ),
+                Some(problem) => (ToastKind::Error, lang::tx(&lang, problem)),
+            };
+            self.toast(kind, text);
+        }
+        if want_cable_page {
+            Self::open_external_url(crate::cable::VB_CABLE_PAGE);
+        }
         if export_backup {
             match self.export_backup() {
                 Ok(path) => {
@@ -3143,9 +4431,6 @@ impl VibeDropApp {
             self.route_test = None;
             self.route_test_running = true;
             self.engine.test_route();
-        }
-        if want_cable_page {
-            Self::open_external_url(crate::cable::VB_CABLE_PAGE);
         }
         if want_sink {
             let output = std::process::Command::new("pactl")
@@ -3483,10 +4768,9 @@ impl VibeDropApp {
                             .color(theme::c_text_dim()),
                         );
                     }
-                    ui.hyperlink_to(
-                        lang::t(&lang, "Official VB-CABLE page"),
-                        "https://vb-audio.com/Cable/",
-                    );
+                    if theme::secondary_button(ui, lang::t(&lang, "Official VB-CABLE page")).clicked() {
+                        Self::open_external_url(crate::cable::VB_CABLE_PAGE);
+                    }
                 });
             });
         if !open {
@@ -3822,10 +5106,7 @@ fn volume_row_inline(ui: &mut Ui, label: &str, value: &mut f32, enabled: bool) -
         vec2(52.0, 18.0),
         egui::Label::new(RichText::new(label).size(12.5).color(theme::c_text_dim())),
     );
-    ui.spacing_mut().slider_width = ui.spacing().slider_width.min(130.0);
-    let changed = ui
-        .add_enabled(enabled, egui::Slider::new(value, 0.0..=1.0).show_value(false))
-        .changed();
+    let changed = theme::volume_slider(ui, value, enabled).changed();
     ui.label(
         RichText::new(format!("{:>3}%", (*value * 100.0).round() as i32))
             .monospace()
@@ -3984,6 +5265,7 @@ fn key_token(key: Key) -> Option<String> {
 impl eframe::App for VibeDropApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_events(ctx);
+        self.tick_music();
         self.handle_close(ctx);
         self.sync_presence();
         // Live appearance changes: re-apply the palette, radius and font size.
@@ -4010,7 +5292,12 @@ impl eframe::App for VibeDropApp {
         }
 
         // Keep the progress bar moving and the event queues drained, but stay idle otherwise.
-        let busy = self.engine.voice_count() > 0 || !self.downloads.is_empty() || !self.toasts.is_empty();
+        let busy = self.engine.voice_count() > 0
+            || !self.downloads.is_empty()
+            || !self.toasts.is_empty()
+            || self.music_player.state().is_active()
+            || self.music_importing
+            || !self.music_downloading.is_empty();
         ctx.request_repaint_after(Duration::from_millis(if busy { 33 } else { 250 }));
     }
 

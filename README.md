@@ -26,6 +26,7 @@ status bar — no audio driver bundled or required, Windows, Linux and macOS sup
 * License: Apache-2.0 (see [`LICENSE`](LICENSE))
 * Status & history: [`PROGRESS.md`](PROGRESS.md), [`CHANGELOG.md`](CHANGELOG.md)
 * Audio routing guide: [`docs/AUDIO_ROUTING.md`](docs/AUDIO_ROUTING.md)
+* Music section guide: [`docs/MUSIC.md`](docs/MUSIC.md)
 
 ## How it works
 
@@ -64,6 +65,14 @@ built-in virtual sink (PipeWire/PulseAudio) without installing anything.
   including AAC/ALAC decode). For video files the audio track plays; use
   "Extract audio to WAV" in a sound's ••• menu to save the sound as a separate WAV.
   Sounds are capped at 5 minutes.
+- **Music section**: paste a Spotify track or album link, get the album grouped with all its
+  tracks, and let VibeDrop download the audio through `yt-dlp` — SoundCloud first (a match is
+  accepted only when its duration is within 15 s of Spotify's), YouTube with "official audio"
+  as the fallback. Per-track states (Queued / Downloading / Ready / Error), an album queue and
+  the three repeat modes (Off / All / One) play through the same headphones + microphone routes
+  as the soundboard. Metadata needs no account: the public Spotify page is used by default, and
+  optional Web API Client ID/Secret makes it more robust. Requires `yt-dlp` and `ffmpeg`
+  (see [`docs/MUSIC.md`](docs/MUSIC.md)).
 - Sound library: add/remove/rename/search/sort sounds, favourites, duplicates detection,
   durations; errors for missing/damaged files stay visible, and the library survives restarts.
 - Global hotkeys: per-sound assignment, re-binding/removal, conflict detection, an explicit

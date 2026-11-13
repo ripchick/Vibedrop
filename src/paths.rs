@@ -11,8 +11,12 @@ pub struct AppPaths {
     pub library_file: PathBuf,
     /// Recently played sounds (kept between sessions).
     pub history_file: PathBuf,
+    /// Music albums and their download state.
+    pub music_file: PathBuf,
     /// VibeDrop-managed copies of imported and downloaded sounds.
     pub sounds_dir: PathBuf,
+    /// Cached audio of the Music section (kept apart from soundboard sounds).
+    pub music_dir: PathBuf,
     pub logs_dir: PathBuf,
 }
 
@@ -23,7 +27,9 @@ impl AppPaths {
             settings_file: root.join("settings.json"),
             library_file: root.join("library.json"),
             history_file: root.join("history.json"),
+            music_file: root.join("music.json"),
             sounds_dir: root.join("sounds"),
+            music_dir: root.join("music"),
             logs_dir: root.join("logs"),
             root,
         }
@@ -35,7 +41,7 @@ impl AppPaths {
     }
 
     pub fn ensure_dirs(&self) -> io::Result<()> {
-        for dir in [&self.root, &self.sounds_dir, &self.logs_dir] {
+        for dir in [&self.root, &self.sounds_dir, &self.music_dir, &self.logs_dir] {
             std::fs::create_dir_all(dir)?;
         }
         Ok(())

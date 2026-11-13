@@ -9,6 +9,7 @@ use vibedrop::app::{Startup, VibeDropApp};
 use vibedrop::downloader;
 use vibedrop::fsutil::LoadStatus;
 use vibedrop::library::Library;
+use vibedrop::music::MusicLibrary;
 use vibedrop::paths::AppPaths;
 use vibedrop::protocol::find_uri_arg;
 use vibedrop::settings::Settings;
@@ -147,6 +148,22 @@ fn main() -> eframe::Result<()> {
             Library::default()
         }
     };
+    let mut music = match MusicLibrary::load(&paths.music_file) {
+        Ok((m, status)) => {
+            if let LoadStatus::Recovered { reason, backup } = status {
+                let kept = backup
+                    .map(|b| format!(" The unreadable data was kept at {}.", b.display()))
+                    .unwrap_or_default();
+                notices.push(format!("music.json had a problem ({reason}).{kept}"));
+            }
+            m
+        }
+        Err(e) => {
+            notices.push(e.to_string());
+            MusicLibrary::default()
+        }
+    };
+    music.refresh();
 
     let wake: WakeHook = Arc::new(Mutex::new(None));
     let (ipc_tx, ipc_rx) = unbounded::<String>();
@@ -158,6 +175,7 @@ fn main() -> eframe::Result<()> {
         paths,
         settings,
         library,
+        music,
         notices,
         initial_uri,
         ipc_rx,

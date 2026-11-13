@@ -1,6 +1,6 @@
 use std::fs;
 use vibedrop::fsutil::LoadStatus;
-use vibedrop::settings::{CloseBehavior, RetriggerPolicy, Settings};
+use vibedrop::settings::{CloseBehavior, MusicSettings, RetriggerPolicy, Settings};
 
 #[test]
 fn missing_file_gives_defaults() {
@@ -71,6 +71,26 @@ fn out_of_range_volumes_are_sanitized() {
     assert_eq!(s.master_volume, 1.0);
     assert_eq!(s.default_sound_volume, 0.0);
     assert_eq!(s.language, "en");
+}
+
+#[test]
+fn music_settings_default_and_are_sanitized() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(
+        &path,
+        br#"{"music": {"yt_dlp_path": "  C:\\tools\\yt-dlp.exe  ", "ffmpeg_path": "", "spotify_client_id": " id ", "spotify_client_secret": " secret ", "volume": 4.0}}"#,
+    )
+    .unwrap();
+    let (s, _) = Settings::load(&path).unwrap();
+    assert_eq!(s.music.yt_dlp_path, "C:\\tools\\yt-dlp.exe");
+    assert_eq!(s.music.spotify_client_id, "id");
+    assert_eq!(s.music.spotify_client_secret, "secret");
+    assert_eq!(s.music.volume, 1.0);
+
+    let (missing, _) = Settings::load(&dir.path().join("missing.json")).unwrap();
+    assert_eq!(missing.music, MusicSettings::default());
+    assert_eq!(missing.music.volume, 0.8);
 }
 
 #[test]
