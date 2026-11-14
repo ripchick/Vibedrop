@@ -43,6 +43,9 @@ pub struct DownloadJob {
     pub duration_secs: f64,
     /// Final MP3 path: `<music_dir>/<track_id>.mp3`.
     pub dest: PathBuf,
+    /// The page the track comes from. When it is set, that page is downloaded directly instead
+    /// of searching for the title (used for SoundCloud, YouTube and direct links).
+    pub source_url: Option<String>,
 }
 
 impl DownloadJob {
@@ -53,6 +56,15 @@ impl DownloadJob {
             artist: track.artist.clone(),
             duration_secs: track.duration_secs,
             dest,
+            source_url: None,
+        }
+    }
+
+    /// A job that downloads exactly one page.
+    pub fn from_url(track: &MusicTrack, dest: PathBuf, source_url: String) -> DownloadJob {
+        DownloadJob {
+            source_url: Some(source_url),
+            ..DownloadJob::from_track(track, dest)
         }
     }
 
@@ -72,6 +84,8 @@ impl DownloadJob {
 pub enum Stage {
     SoundCloud,
     YouTube,
+    /// The track comes from a given page (SoundCloud, YouTube, a direct link).
+    Direct,
 }
 
 impl Stage {
@@ -79,6 +93,7 @@ impl Stage {
         match self {
             Stage::SoundCloud => "SoundCloud",
             Stage::YouTube => "YouTube",
+            Stage::Direct => "the link",
         }
     }
 }
@@ -283,8 +298,36 @@ fn run_job(
     cleanup_track_files(dest_dir, &job.track_id);
 
     let query = job.query();
-    if query.trim().is_empty() {
+    if query.trim().is_empty() && job.source_url.is_none() {
         return DownloadResult::Failed("The track has no title to search for.".to_string());
+    }
+
+    // A track that comes from a known page is downloaded from there, without searching.
+    if let Some(url) = job.source_url.as_deref().filter(|u| !u.trim().is_empty()) {
+        let _ = events.send(DownloadEvent::Started {
+            track_id: job.track_id.clone(),
+            stage: Stage::Direct,
+        });
+        let candidate = Candidate {
+            webpage_url: url.to_string(),
+            duration_secs: (job.duration_secs > 0.0).then_some(job.duration_secs),
+            title: job.title.clone(),
+        };
+        return match download_candidate(job, Stage::Direct, &candidate, dest_dir, yt_dlp, tools, cancel, current) {
+            Ok(downloaded) => DownloadResult::Ready(downloaded),
+            Err(AttemptError::Cancelled) => DownloadResult::Cancelled,
+            Err(e) => {
+                cleanup_track_files(dest_dir, &job.track_id);
+                DownloadResult::Failed(match e {
+                    AttemptError::Failed(why) => why,
+                    AttemptError::NoMatch(why) => why,
+                    AttemptError::Cancelled => "the download was cancelled".to_string(),
+                    AttemptError::DurationMismatch { found, target, limit } => format!(
+                        "the track is {found:.0} s long, the link says {target:.0} s (allowed difference {limit:.0} s)"
+                    ),
+                })
+            }
+        };
     }
 
     let attempts = [
@@ -370,6 +413,21 @@ fn attempt(
             .unwrap_or_else(|| "?".to_string())
     );
 
+    download_candidate(job, stage, &candidate, dest_dir, yt_dlp, tools, cancel, current)
+}
+
+/// Download the page of a candidate and convert it to MP3.
+#[allow(clippy::too_many_arguments)]
+fn download_candidate(
+    job: &DownloadJob,
+    stage: Stage,
+    candidate: &Candidate,
+    dest_dir: &Path,
+    yt_dlp: &Path,
+    tools: &Tools,
+    cancel: &AtomicBool,
+    current: &RunningChild,
+) -> Result<DownloadedTrack, AttemptError> {
     let template = format!("{}.%(ext)s", job.dest.with_extension("").display());
     let mut args: Vec<OsString> = vec![
         "--ignore-config".into(),
@@ -419,7 +477,7 @@ fn attempt(
     Ok(DownloadedTrack {
         path,
         source: stage.label().to_string(),
-        source_url: candidate.webpage_url,
+        source_url: candidate.webpage_url.clone(),
         duration_secs: candidate.duration_secs,
     })
 }
@@ -548,6 +606,7 @@ mod tests {
             artist: "The Beatles".to_string(),
             duration_secs: 259.946,
             dest: PathBuf::from("music/abc.mp3"),
+            source_url: None,
         }
     }
 

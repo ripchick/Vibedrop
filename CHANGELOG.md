@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.14.2
+
+### Added
+- **SoundCloud, YouTube and direct links in the Music section.** Any link that yt-dlp can read
+  (a SoundCloud track or set, a YouTube video or playlist, a direct link to an audio file) can
+  be pasted into the Music page; yt-dlp fetches its metadata and downloads it from that very
+  page. Spotify keeps its own path with the embed page and the Web API.
+- **Update check.** VibeDrop asks GitHub in the background whether a newer release exists and,
+  if so, shows a clickable notification that opens the download page. Nothing is downloaded
+  on its own.
+- **Close into the tray.** Closing the window can hide VibeDrop in the tray instead of quitting
+  it, so the global hotkeys keep working. The choice is in Settings -> Application (Quit /
+  Minimize / Hide in the tray) and defaults to quitting.
+
+### Fixed
+- Discord Rich Presence: the elapsed time no longer freezes. Discord answers every command and
+  nobody read those answers, so they piled up in the pipe until it was full and the writes
+  blocked. The answers are read away after every update.
+- The Russian texts that were damaged by a wrong encoding are proper UTF-8 again.
+
 ## 0.14.1
 
 ### Added

@@ -28,6 +28,7 @@ use crate::music::download::{
     self as music_download, DownloadEvent as MusicDownloadEvent, DownloadJob, DownloadResult,
 };
 use crate::music::player::{PlaybackState, RepeatMode, MUSIC_SOUND_PREFIX};
+use crate::music::source::{self, FetchedSource, SourceLink};
 use crate::music::spotify::{self, FetchedEntity, SpotifyLink};
 use crate::music::tools::Tools;
 use crate::music::{CollectionKind, MusicAlbum, MusicLibrary, MusicPlayer, MusicTrack, TrackStatus};
@@ -137,6 +138,8 @@ struct Toast {
     until: Instant,
     /// When the toast appeared, for the fade-in.
     born: Instant,
+    /// A page that is opened when the toast is clicked.
+    link: Option<String>,
 }
 
 #[derive(Clone)]
@@ -183,11 +186,20 @@ struct UrlDialog {
     focus: bool,
 }
 
-/// Result of reading a Spotify link on a background thread.
-struct MusicImportResult {
-    seq: u64,
-    link: SpotifyLink,
-    result: Result<FetchedEntity, String>,
+/// Result of reading a music link on a background thread.
+enum MusicImportResult {
+    /// A Spotify track, album or playlist.
+    Spotify {
+        seq: u64,
+        link: SpotifyLink,
+        result: Result<FetchedEntity, String>,
+    },
+    /// A SoundCloud track or set, a YouTube video or playlist, or a direct audio link.
+    Source {
+        seq: u64,
+        link: SourceLink,
+        result: Result<FetchedSource, String>,
+    },
 }
 
 /// Everything the Music page can ask the app to do after the UI has been drawn.
@@ -309,6 +321,16 @@ pub struct VibeDropApp {
 
     protocol_state: ProtocolState,
 
+    /// The tray icon, created the first time the window is closed into the tray.
+    tray: Option<crate::tray::Tray>,
+    /// The newest version found by the update check.
+    update_rx: Receiver<Option<String>>,
+    /// Kept alive so the channel stays open.
+    #[allow(dead_code)]
+    update_tx: Sender<Option<String>>,
+    /// The update was already shown, so it is not repeated on every start.
+    update_shown: bool,
+
     settings_dirty: bool,
     library_dirty: bool,
     quitting: bool,
@@ -352,6 +374,19 @@ impl VibeDropApp {
         let (hk_tx, hk_rx) = unbounded::<String>();
         let (dl_tx, dl_rx) = unbounded::<DownloadEvent>();
         let (mi_tx, mi_rx) = unbounded::<MusicImportResult>();
+        let (upd_tx, upd_rx) = unbounded::<Option<String>>();
+        // Ask GitHub in the background whether a newer version exists.
+        {
+            let tx = upd_tx.clone();
+            let _ = std::thread::Builder::new()
+                .name("vibedrop-update".to_string())
+                .spawn(move || {
+                    let found = crate::update::latest_version()
+                        .ok()
+                        .filter(|latest| crate::update::is_newer(latest, crate::update::current_version()));
+                    let _ = tx.send(found);
+                });
+        }
         let music_tools = Tools::default();
         let music_downloads = music_download::start(paths.music_dir.clone(), music_tools.clone());
         let music_selected_album = music.albums.first().map(|a| a.id.clone());
@@ -417,6 +452,10 @@ impl VibeDropApp {
             url_dialog: None,
             clear_data_dialog: false,
             protocol_state: system::protocol_state(),
+            tray: None,
+            update_rx: upd_rx,
+            update_tx: upd_tx,
+            update_shown: false,
             settings_dirty: false,
             library_dirty: false,
             quitting: false,
@@ -514,6 +553,15 @@ impl VibeDropApp {
     }
 
     fn toast(&mut self, kind: ToastKind, text: impl Into<String>) {
+        self.push_toast(kind, text, None);
+    }
+
+    /// A toast that opens a page when it is clicked.
+    fn toast_with_link(&mut self, kind: ToastKind, text: impl Into<String>, link: String) {
+        self.push_toast(kind, text, Some(link));
+    }
+
+    fn push_toast(&mut self, kind: ToastKind, text: impl Into<String>, link: Option<String>) {
         let text = text.into();
         if kind == ToastKind::Error {
             tracing::warn!("{text}");
@@ -524,6 +572,7 @@ impl VibeDropApp {
             text,
             until: now + TOAST_LIFETIME,
             born: now,
+            link,
         });
         if self.toasts.len() > MAX_TOASTS {
             self.toasts.remove(0);
@@ -1190,32 +1239,129 @@ impl VibeDropApp {
         if self.music_importing {
             return;
         }
-        let link = match spotify::parse_link(&self.music_url) {
-            Ok(link) => link,
-            Err(e) => {
-                self.music_import_error = Some(e);
-                return;
-            }
-        };
+        let text = self.music_url.trim().to_string();
         self.music_import_error = None;
+
+        // Spotify is read with its own metadata, everything else with yt-dlp.
+        let spotify_link = spotify::parse_link(&text).ok();
+        let source_link = if spotify_link.is_none() {
+            match source::parse_link(&text) {
+                Ok(link) => Some(link),
+                Err(e) => {
+                    self.music_import_error = Some(e);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
         self.music_importing = true;
         self.music_import_seq += 1;
         let seq = self.music_import_seq;
         let tx = self.music_import_tx.clone();
-        let credentials = spotify::resolve_credentials(
-            &self.settings.music.spotify_client_id,
-            &self.settings.music.spotify_client_secret,
-        );
+
+        if let Some(link) = spotify_link {
+            let credentials = spotify::resolve_credentials(
+                &self.settings.music.spotify_client_id,
+                &self.settings.music.spotify_client_secret,
+            );
+            let spawned = std::thread::Builder::new()
+                .name("vibedrop-spotify".to_string())
+                .spawn(move || {
+                    let result = spotify::fetch(&link, credentials.as_ref());
+                    let _ = tx.send(MusicImportResult::Spotify { seq, link, result });
+                });
+            if let Err(e) = spawned {
+                self.music_importing = false;
+                self.music_import_error = Some(format!("Could not start the Spotify request: {e}"));
+            }
+            return;
+        }
+
+        let link = source_link.expect("a source link");
+        let tools = self.music_tools.clone();
         let spawned = std::thread::Builder::new()
-            .name("vibedrop-spotify".to_string())
+            .name("vibedrop-source".to_string())
             .spawn(move || {
-                let result = spotify::fetch(&link, credentials.as_ref());
-                let _ = tx.send(MusicImportResult { seq, link, result });
+                let result = source::fetch(&link, &tools);
+                let _ = tx.send(MusicImportResult::Source { seq, link, result });
             });
         if let Err(e) = spawned {
             self.music_importing = false;
-            self.music_import_error = Some(format!("Could not start the Spotify request: {e}"));
+            self.music_import_error = Some(format!("Could not start the request: {e}"));
         }
+    }
+
+    /// Add a SoundCloud set, a YouTube video or a direct link to the music library.
+    fn add_music_source(&mut self, entity: FetchedSource, link: &SourceLink) {
+        let lang = self.settings.language.clone();
+        let canonical = link.url.clone();
+        if let Some(existing) = self
+            .music
+            .albums
+            .iter()
+            .find(|a| a.source_url == canonical)
+            .map(|a| a.id.clone())
+        {
+            self.music_selected_album = Some(existing.clone());
+            self.toast(
+                ToastKind::Info,
+                if lang::ru(&lang) {
+                    "Эта коллекция уже добавлена — докачиваем недостающие треки.".to_string()
+                } else {
+                    "This collection is already in your music library. Downloading the missing tracks.".to_string()
+                },
+            );
+            self.queue_album_downloads(&existing);
+            return;
+        }
+        let album_title = if entity.title.trim().is_empty() {
+            link.kind.collection_label().to_string()
+        } else {
+            entity.title.clone()
+        };
+        let mut album = MusicAlbum {
+            id: uuid::Uuid::new_v4().to_string(),
+            spotify_id: None,
+            title: album_title.clone(),
+            artist: entity.artist.clone(),
+            cover_url: entity.cover_url.clone(),
+            source_url: canonical,
+            added_at: unix_now(),
+            kind: CollectionKind::Playlist,
+            tracks: Vec::new(),
+        };
+        for fetched in entity.tracks {
+            let track_album = if fetched.album.trim().is_empty() {
+                album_title.clone()
+            } else {
+                fetched.album.clone()
+            };
+            let mut track = MusicTrack::new(fetched.title, fetched.artist, track_album, fetched.duration_secs, None);
+            track.page_url = Some(fetched.url);
+            track.status = TrackStatus::Queued;
+            album.tracks.push(track);
+        }
+        if album.tracks.is_empty() {
+            self.music_import_error = Some("This link did not contain any tracks.".to_string());
+            return;
+        }
+        let count = album.tracks.len();
+        let album_id = self.music.add_album(album);
+        self.music_selected_album = Some(album_id.clone());
+        self.music_dirty = true;
+        self.save_music();
+        self.music_url.clear();
+        self.toast(
+            ToastKind::Success,
+            if lang::ru(&lang) {
+                format!("Добавлено треков: {count}. Начинаю скачивание.")
+            } else {
+                format!("Added {count} track(s). Starting the download.")
+            },
+        );
+        self.queue_album_downloads(&album_id);
     }
 
     fn add_music_entity(&mut self, entity: FetchedEntity, link: &SpotifyLink) {
@@ -1374,7 +1520,12 @@ impl VibeDropApp {
         self.music
             .set_status(&track.id, TrackStatus::Downloading, Some("searching".to_string()));
         self.music_dirty = true;
-        self.music_downloads.enqueue(DownloadJob::from_track(track, dest));
+        let job = match track.page_url.as_ref().filter(|u| !u.trim().is_empty()) {
+            // The track comes from a known page: download it from there.
+            Some(url) => DownloadJob::from_url(track, dest, url.clone()),
+            None => DownloadJob::from_track(track, dest),
+        };
+        self.music_downloads.enqueue(job);
     }
 
     fn retry_music_track(&mut self, track_id: &str) {
@@ -1596,15 +1747,32 @@ impl VibeDropApp {
     /// Spotify results and music download events.
     fn pump_music_events(&mut self, lang: &str) {
         while let Ok(import) = self.music_import_rx.try_recv() {
-            if import.seq != self.music_import_seq {
-                continue; // a newer import replaced this request
-            }
-            self.music_importing = false;
-            match import.result {
-                Ok(entity) => self.add_music_entity(entity, &import.link),
-                Err(e) => {
-                    self.music_import_error = Some(e.clone());
-                    self.toast(ToastKind::Error, lang::tx(lang, &e));
+            match import {
+                MusicImportResult::Spotify { seq, link, result } => {
+                    if seq != self.music_import_seq {
+                        continue; // a newer import replaced this request
+                    }
+                    self.music_importing = false;
+                    match result {
+                        Ok(entity) => self.add_music_entity(entity, &link),
+                        Err(e) => {
+                            self.music_import_error = Some(e.clone());
+                            self.toast(ToastKind::Error, lang::tx(lang, &e));
+                        }
+                    }
+                }
+                MusicImportResult::Source { seq, link, result } => {
+                    if seq != self.music_import_seq {
+                        continue;
+                    }
+                    self.music_importing = false;
+                    match result {
+                        Ok(entity) => self.add_music_source(entity, &link),
+                        Err(e) => {
+                            self.music_import_error = Some(e.clone());
+                            self.toast(ToastKind::Error, lang::tx(lang, &e));
+                        }
+                    }
                 }
             }
         }
@@ -1938,10 +2106,78 @@ impl VibeDropApp {
 
     fn handle_close(&mut self, ctx: &egui::Context) {
         let close_requested = ctx.input(|i| i.viewport().close_requested());
-        if close_requested && !self.quitting && self.settings.close_behavior == CloseBehavior::Minimize {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        if close_requested && !self.quitting {
+            match self.settings.close_behavior {
+                CloseBehavior::Minimize => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                CloseBehavior::Tray => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.hide_to_tray(ctx);
+                }
+                CloseBehavior::Exit => {}
+            }
         }
+    }
+
+    /// Hide the window and keep VibeDrop running in the tray.
+    fn hide_to_tray(&mut self, ctx: &egui::Context) {
+        if self.tray.is_none() {
+            self.tray = crate::tray::Tray::new();
+        }
+        if self.tray.is_none() {
+            // No tray possible (for example a headless session): minimize instead.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let lang = self.settings.language.clone();
+        self.toast(
+            ToastKind::Info,
+            if lang::ru(&lang) {
+                "VibeDrop свернулся в трей. Откройте окно через значок в трее.".to_string()
+            } else {
+                "VibeDrop went into the tray. Open the window from the tray icon.".to_string()
+            },
+        );
+    }
+
+    /// What the user chose in the tray menu.
+    fn handle_tray(&mut self, ctx: &egui::Context) {
+        let Some(tray) = self.tray.as_ref() else {
+            return;
+        };
+        match tray.action() {
+            Some(crate::tray::TrayAction::Show) => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            Some(crate::tray::TrayAction::Quit) => {
+                self.quitting = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            None => {}
+        }
+    }
+
+    /// Tell the user when a newer version is available.
+    fn check_for_update(&mut self) {
+        if self.update_shown {
+            return;
+        }
+        let Ok(Some(latest)) = self.update_rx.try_recv() else {
+            return;
+        };
+        self.update_shown = true;
+        let lang = self.settings.language.clone();
+        let text = if lang::ru(&lang) {
+            format!("Доступна новая версия VibeDrop {latest}. Нажмите, чтобы скачать.")
+        } else {
+            format!("VibeDrop {latest} is available. Click to download it.")
+        };
+        self.toast_with_link(ToastKind::Info, text, crate::update::RELEASES_PAGE.to_string());
     }
 
     // ---- Drawing: panels ---------------------------------------------------------------------
@@ -3041,7 +3277,7 @@ impl VibeDropApp {
                     egui::TextEdit::singleline(&mut self.music_url)
                         .hint_text(lang::t(
                             &lang,
-                            "Paste a Spotify track, album or playlist link, e.g. https://open.spotify.com/playlist/...",
+                            "Paste a Spotify, SoundCloud or YouTube link, or a direct link to an audio file",
                         ))
                         .desired_width(width),
                 );
@@ -4490,7 +4726,11 @@ impl VibeDropApp {
                             .width(300.0)
                             .selected_text(close_label(&lang, self.settings.close_behavior))
                             .show_ui(ui, |ui| {
-                                for b in [CloseBehavior::Exit, CloseBehavior::Minimize] {
+                                for b in [
+                                    CloseBehavior::Exit,
+                                    CloseBehavior::Minimize,
+                                    CloseBehavior::Tray,
+                                ] {
                                     ui.selectable_value(&mut self.settings.close_behavior, b, close_label(&lang, b));
                                 }
                             });
@@ -5155,7 +5395,19 @@ impl VibeDropApp {
                         .show(ui, |ui| {
                             ui.set_opacity(opacity);
                             ui.set_max_width(380.0);
-                            ui.label(RichText::new(&toast.text).color(theme::c_text()));
+                            let mut label = RichText::new(&toast.text).color(theme::c_text());
+                            if toast.link.is_some() {
+                                label = label.strong();
+                            }
+                            if let Some(link) = toast.link.as_deref() {
+                                // Clicking the toast opens the page.
+                                let response = ui.add(egui::Label::new(label).sense(Sense::click()));
+                                if response.clicked() {
+                                    Self::open_external_url(link);
+                                }
+                            } else {
+                                ui.label(label);
+                            }
                         });
                 }
             });
@@ -5522,6 +5774,7 @@ fn close_label(lang: &str, behavior: CloseBehavior) -> &'static str {
     match behavior {
         CloseBehavior::Exit => lang::t(lang, "Quit VibeDrop"),
         CloseBehavior::Minimize => lang::t(lang, "Minimize (hotkeys keep working)"),
+        CloseBehavior::Tray => lang::t(lang, "Hide in the tray (hotkeys keep working)"),
     }
 }
 
@@ -5662,6 +5915,8 @@ impl eframe::App for VibeDropApp {
         self.covers.poll();
         self.tick_music();
         self.handle_close(ctx);
+        self.handle_tray(ctx);
+        self.check_for_update();
         self.sync_presence();
         // Live appearance changes: re-apply the palette, radius and font size.
         if self.applied_theme != self.settings.theme {

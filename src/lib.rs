@@ -16,3 +16,5 @@ pub mod protocol;
 pub mod settings;
 pub mod system;
 pub mod theme;
+pub mod tray;
+pub mod update;

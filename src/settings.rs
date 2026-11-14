@@ -29,6 +29,8 @@ pub enum CloseBehavior {
     Exit,
     /// Closing the window minimizes it so hotkeys keep working.
     Minimize,
+    /// Closing the window hides VibeDrop in the tray; it keeps running in the background.
+    Tray,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

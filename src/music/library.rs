@@ -66,6 +66,10 @@ pub struct MusicTrack {
     /// Page the audio actually came from.
     #[serde(default)]
     pub source_url: Option<String>,
+    /// The page the track is downloaded from, when the track was imported by link
+    /// (SoundCloud, YouTube, a direct file). Then the download does not search for the title.
+    #[serde(default)]
+    pub page_url: Option<String>,
 }
 
 impl MusicTrack {
@@ -93,6 +97,7 @@ impl MusicTrack {
             detail: None,
             source: None,
             source_url: None,
+            page_url: None,
         }
     }
 

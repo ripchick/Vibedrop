@@ -208,6 +208,7 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "APPLICATION" => "ПРИЛОЖЕНИЕ",
         "When the window is closed" => "При закрытии окна",
         "Minimize (hotkeys keep working)" => "Свернуть (горячие клавиши продолжают работать)",
+        "Hide in the tray (hotkeys keep working)" => "Свернуть в трей (горячие клавиши продолжают работать)",
         "Importing files" => "Импорт файлов",
         "Copy files into the VibeDrop folder" => "Копировать файлы в папку VibeDrop",
         "Removing sounds" => "Удаление звуков",
@@ -284,6 +285,9 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Clear cache" => "Очистить кэш",
         "Paste a Spotify track, album or playlist link, e.g. https://open.spotify.com/playlist/..." => {
             "Вставьте ссылку Spotify на трек, альбом или плейлист, например https://open.spotify.com/playlist/..."
+        }
+        "Paste a Spotify, SoundCloud or YouTube link, or a direct link to an audio file" => {
+            "Вставьте ссылку Spotify, SoundCloud или YouTube либо прямую ссылку на аудиофайл"
         }
         "Albums and playlists are grouped; all tracks are downloaded in the background through SoundCloud, then YouTube if needed." => {
             "Альбомы и плейлисты группируются; все треки скачиваются в фоне через SoundCloud, при необходимости — через YouTube."

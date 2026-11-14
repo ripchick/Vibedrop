@@ -14,10 +14,12 @@ pub mod cover;
 pub mod download;
 pub mod library;
 pub mod player;
+pub mod source;
 pub mod spotify;
 pub mod tools;
 
 pub use library::{CollectionKind, MusicAlbum, MusicLibrary, MusicTrack, TrackStatus};
 pub use player::{MusicPlayer, PlaybackState, RepeatMode};
+pub use source::{FetchedSource, SourceKind, SourceLink};
 pub use spotify::{FetchedEntity, SpotifyKind, SpotifyLink};
 pub use tools::Tools;
