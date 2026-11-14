@@ -23,6 +23,10 @@ pub enum DiscordStatus {
 struct Presence {
     details: Option<String>,
     state: Option<String>,
+    /// The start of the track, so Discord can draw a progress bar.
+    started: Option<i64>,
+    /// The end of the track, so Discord can draw a progress bar.
+    ended: Option<i64>,
     /// The picture shown next to the activity. Discord accepts a direct image address here, so
     /// the cover of the album that is playing can be shown.
     image: Option<String>,
@@ -55,19 +59,23 @@ impl DiscordPresence {
         &self,
         details: Option<String>,
         state: Option<String>,
+        started: Option<i64>,
+        ended: Option<i64>,
         image: Option<String>,
         image_text: Option<String>,
     ) {
         let _ = self.tx.try_send(Presence {
             details,
             state,
+            started,
+            ended,
             image,
             image_text,
         });
     }
 
     pub fn clear(&self) {
-        self.set(None, None, None, None);
+        self.set(None, None, None, None, None, None);
     }
 }
 
@@ -136,7 +144,13 @@ fn worker(rx: Receiver<Presence>, status: Arc<Mutex<DiscordStatus>>) {
             }
             let now = std::time::Instant::now();
             let changed = match (&last, &last_sent_presence) {
-                (Some(a), Some(b)) => a.details != b.details || a.state != b.state || a.image != b.image,
+                (Some(a), Some(b)) => {
+                    a.details != b.details
+                        || a.state != b.state
+                        || a.started != b.started
+                        || a.ended != b.ended
+                        || a.image != b.image
+                }
                 (Some(_), None) => true,
                 (None, Some(_)) => true,
                 (None, None) => false,
@@ -251,6 +265,11 @@ fn activity_payload(pid: u32, presence: Option<&Presence>) -> String {
             let state = p.state.as_deref().unwrap_or_default();
             // The picture: the cover of the album that is playing (a direct address) or the
             // application's own logo. No timestamps: the elapsed time is not shown.
+            let timestamps = match (p.started, p.ended) {
+                (Some(s), Some(e)) => format!(",\"timestamps\":{{\"start\":{s},\"end\":{e}}}"),
+                (Some(s), None) => format!(",\"timestamps\":{{\"start\":{s}}}"),
+                _ => String::new(),
+            };
             let assets = match p.image.as_deref() {
                 Some(url) if !url.is_empty() => {
                     let text = match p.image_text.as_deref() {
@@ -263,7 +282,7 @@ fn activity_payload(pid: u32, presence: Option<&Presence>) -> String {
             };
             format!(
                 "{{\"name\":\"{ACTIVITY_NAME}\",\"type\":2,\"application_id\":\"{CLIENT_ID}\",\
-                 \"details\":{},\"state\":{},{assets},\
+                 \"details\":{},\"state\":{},{assets}{timestamps},\
                  \"instance\":true}}",
                 json_str(details),
                 json_str(state),
@@ -345,6 +364,8 @@ mod tests {
         Presence {
             details: Some("Кино - Спокойная ночь".to_string()),
             state: Some("0:03 / 3:34".to_string()),
+            started: Some(1_700_000_000),
+            ended: Some(1_700_000_214),
             image: image.map(str::to_string),
             image_text: Some("Спокойная ночь".to_string()),
         }
@@ -357,7 +378,8 @@ mod tests {
         assert!(payload.contains("\"cmd\":\"SET_ACTIVITY\""), "{payload}");
         assert!(payload.contains(&format!("\"large_image\":\"{url}\"")), "{payload}");
         assert!(payload.contains("\"large_text\":\"Спокойная ночь\""), "{payload}");
-        assert!(!payload.contains("\"timestamps\""), "{payload}");
+        assert!(payload.contains("\"start\":1700000000"), "{payload}");
+        assert!(payload.contains("\"end\":1700000214"), "{payload}");
         // The payload has to be valid JSON.
         let value: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
         let activity = &value["args"]["activity"];

@@ -121,11 +121,11 @@ jobs:
             vibedrop-linux-x64.tar.gz
             vibedrop-macos-arm64.tar.gz
           body: |
-            VibeDrop soundboard вЂ” desktop (Windows, Linux, macOS), Rust.
+            VibeDrop soundboard — desktop (Windows, Linux, macOS), Rust.
             See `README.md` / `README.ru.md` for details.
 
             Optional free virtual cable for voice chats (Windows):
-            VB-CABLE (official freeware by VB-Audio) вЂ”
+            VB-CABLE (official freeware by VB-Audio) —
             https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
             No driver ships inside VibeDrop itself.
           generate_release_notes: true

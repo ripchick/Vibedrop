@@ -3132,10 +3132,14 @@ impl VibeDropApp {
                 } else {
                     Some(lang::t(&self.settings.language, "Music").to_string())
                 };
+                let started = playing.then(|| (unix_now() as i64).saturating_sub(pos.round() as i64));
+                let ended = playing.then(|| started.unwrap_or(0) + total.round() as i64);
                 let album = self.music_player.album_id().and_then(|id| self.music.get(id)).cloned();
                 self.discord.set(
                     Some(name),
                     state,
+                    started,
+                    ended,
                     album.as_ref().and_then(|a| a.cover_url.clone()),
                     Some(track.title.clone()),
                 );
@@ -3149,19 +3153,21 @@ impl VibeDropApp {
             .map(|e| e.name.clone());
         let playing = self.now_playing.as_deref().is_some_and(|id| self.engine.is_playing(id));
         let progress = self.now_playing.as_deref().and_then(|id| self.engine.progress(id));
-        let (details, state) = match (&now_name, playing, progress) {
-            (Some(name), true, Some((_pos, total))) => {
+        let (details, state, started, ended) = match (&now_name, playing, progress) {
+            (Some(name), true, Some((pos, total))) => {
                 let state = if total > 0.0 {
-                    format!("{} / {}", theme::fmt_time(_pos), theme::fmt_time(total))
+                    format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total))
                 } else {
-                    theme::fmt_time(_pos)
+                    theme::fmt_time(pos)
                 };
-                (Some(name.clone()), Some(state))
+                let started = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                let ended = started + total.round() as i64;
+                (Some(name.clone()), Some(state), Some(started), Some(ended))
             }
-            (Some(name), _, _) => (Some(name.clone()), None),
-            (None, _, _) => (None, None),
+            (Some(name), _, _) => (Some(name.clone()), None, None, None),
+            (None, _, _) => (None, None, None, None),
         };
-        self.discord.set(details, state, None, None);
+        self.discord.set(details, state, started, ended, None, None);
     }
 
     // ---- Drawing: music ----------------------------------------------------------------------
