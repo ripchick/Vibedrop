@@ -2061,7 +2061,7 @@ impl VibeDropApp {
                 let counts = if lang::ru(&lang) {
                     format!("{} звуков · {} избранных", self.library.len(), favorites)
                 } else {
-                    format!("{} sounds В· {} favorites", self.library.len(), favorites)
+                    format!("{} sounds · {} favorites", self.library.len(), favorites)
                 };
                 ui.label(RichText::new(counts).size(12.0).color(theme::c_text_faint()));
                 if theme::nav_item(
@@ -2492,7 +2492,7 @@ impl VibeDropApp {
         } else {
             (
                 lang::t(&lang, "Library"),
-                format!("{total} sounds В· {favorites} favorites"),
+                format!("{total} sounds · {favorites} favorites"),
             )
         };
         page_header(ui, title, &subtitle, |ui| {
@@ -2994,7 +2994,7 @@ impl VibeDropApp {
         let subtitle = if ru {
             format!("{total} треков · готово {ready} · кэш {cache_mb:.1} МБ")
         } else {
-            format!("{total} tracks В· {ready} ready В· {cache_mb:.1} MB cached")
+            format!("{total} tracks · {ready} ready · {cache_mb:.1} MB cached")
         };
         let downloading = !self.music_downloading.is_empty();
         let tools_ready = self.music_tools.ready();
@@ -3176,7 +3176,7 @@ impl VibeDropApp {
                                 parts.push(a.title.clone());
                             }
                             parts.push(state_text.clone());
-                            parts.join(" В· ")
+                            parts.join(" · ")
                         }
                         _ => state_text.clone(),
                     };
@@ -3437,7 +3437,7 @@ impl VibeDropApp {
                                                 let meta = if ru {
                                                     format!("{} · {} треков", album.artist, album.tracks.len())
                                                 } else {
-                                                    format!("{} В· {} tracks", album.artist, album.tracks.len())
+                                                    format!("{} · {} tracks", album.artist, album.tracks.len())
                                                 };
                                                 ui.label(RichText::new(meta).size(11.5).color(theme::c_text_faint()));
                                             },
@@ -3506,7 +3506,7 @@ impl VibeDropApp {
                                 if ru {
                                     "Плейлист · "
                                 } else {
-                                    "Playlist В· "
+                                    "Playlist · "
                                 }
                             } else {
                                 ""
@@ -3522,7 +3522,7 @@ impl VibeDropApp {
                                 )
                             } else {
                                 format!(
-                                    "{prefix}{} В· {} tracks В· {} В· {}/{} ready",
+                                    "{prefix}{} · {} tracks · {} · {}/{} ready",
                                     album.artist,
                                     album.tracks.len(),
                                     theme::fmt_time(album.duration_secs()),
@@ -3615,7 +3615,7 @@ impl VibeDropApp {
                                                 } else if !track.artist.trim().is_empty() {
                                                     match &track.source {
                                                         Some(source) if track.status == TrackStatus::Ready => {
-                                                            format!("{} В· {source}", track.artist)
+                                                            format!("{} · {source}", track.artist)
                                                         }
                                                         _ => track.artist.clone(),
                                                     }
@@ -3800,6 +3800,8 @@ impl VibeDropApp {
         let mut open_data_folder = false;
         let mut clear_data = false;
         let mut check_music_tools = false;
+        let mut open_yt_dlp_page = false;
+        let mut open_ffmpeg_page = false;
 
         page_header(
             ui,
@@ -3905,7 +3907,7 @@ impl VibeDropApp {
                         let msg = if std::env::consts::OS == "linux" {
                             lang::t(
                                 &lang,
-                                "No virtual audio device (cable) was found on this PC. Without one sound cannot be sent into the microphone. Create a PipeWire null sink вЂ” see \"How to set up the microphone route\" below.",
+                                "No virtual audio device (cable) was found on this PC. Without one sound cannot be sent into the microphone. Create a PipeWire null sink — see \"How to set up the microphone route\" below.",
                             )
                             .to_string()
                         } else {
@@ -4190,7 +4192,7 @@ impl VibeDropApp {
                             self.music_tools.yt_dlp_version.as_deref(),
                             self.music_tools.ffmpeg_version.as_deref(),
                         ) {
-                            (Some(yt), Some(ff)) => (theme::c_accent(), format!("yt-dlp {yt} В· ffmpeg {ff}")),
+                            (Some(yt), Some(ff)) => (theme::c_accent(), format!("yt-dlp {yt} · ffmpeg {ff}")),
                             _ => (
                                 theme::c_warning(),
                                 self.music_tools.problem().unwrap_or_else(|| {
@@ -4211,6 +4213,21 @@ impl VibeDropApp {
                         .size(12.0)
                         .color(theme::c_text_faint()),
                     );
+                    ui.add_space(4.0);
+                    // yt-dlp and ffmpeg are separate programs with their own licenses; VibeDrop
+                    // never ships them, it only opens the official pages.
+                    ui.horizontal_wrapped(|ui| {
+                        if theme::secondary_button(ui, lang::t(&lang, "Open the official yt-dlp page"))
+                            .clicked()
+                        {
+                            open_yt_dlp_page = true;
+                        }
+                        if theme::secondary_button(ui, lang::t(&lang, "Open the official FFmpeg page"))
+                            .clicked()
+                        {
+                            open_ffmpeg_page = true;
+                        }
+                    });
                 });
 
                 // Appearance: theme, accent, radius, font size and panel visibility.
@@ -4439,13 +4456,13 @@ impl VibeDropApp {
                     ui.set_width(ui.available_width());
                     theme::section_title(ui, lang::t(&lang, "APPLICATION"));
                     egui::Grid::new("app_grid").num_columns(2).spacing([24.0, 12.0]).show(ui, |ui| {
-                        ui.label("Language / РЇР·С‹Рє");
+                        ui.label("Language / Язык");
                         egui::ComboBox::from_id_source("language")
                             .width(300.0)
-                            .selected_text(if lang::ru(&lang) { "Р СѓСЃСЃРєРёР№" } else { "English" })
+                            .selected_text(if lang::ru(&lang) { "Русский" } else { "English" })
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(&mut self.settings.language, "en".to_string(), "English");
-                                ui.selectable_value(&mut self.settings.language, "ru".to_string(), "Р СѓСЃСЃРєРёР№");
+                                ui.selectable_value(&mut self.settings.language, "ru".to_string(), "Русский");
                             });
                         ui.end_row();
 
@@ -4618,6 +4635,12 @@ impl VibeDropApp {
             };
             self.toast(kind, text);
         }
+        if open_yt_dlp_page {
+            Self::open_external_url(crate::music::tools::YT_DLP_PAGE);
+        }
+        if open_ffmpeg_page {
+            Self::open_external_url(crate::music::tools::FFMPEG_PAGE);
+        }
         if want_cable_page {
             Self::open_external_url(crate::cable::VB_CABLE_PAGE);
         }
@@ -4625,7 +4648,7 @@ impl VibeDropApp {
             match self.export_backup() {
                 Ok(path) => {
                     let text = if ru {
-                        format!("Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ СЃРѕС…СЂР°РЅРµРЅР°: {path}")
+                        format!("Резервная копия сохранена: {path}")
                     } else {
                         format!("Backup saved: {path}")
                     };
@@ -4993,7 +5016,7 @@ impl VibeDropApp {
                     if lang::ru(&lang) {
                         ui.label(
                             RichText::new(
-                                "VibeDrop вЂ” РЅРµР·Р°РІРёСЃРёРјС‹Р№ РїСЂРѕРµРєС‚ СЃ РѕС‚РєСЂС‹С‚С‹Рј РёСЃС…РѕРґРЅС‹Рј РєРѕРґРѕРј (Р»РёС†РµРЅР·РёСЏ Apache-2.0), РІРґРѕС…РЅРѕРІР»С‘РЅРЅС‹Р№ СЃР°СѓРЅРґР±РѕСЂРґР°РјРё РІ РґСѓС…Рµ Soundpad. Soundpad вЂ” С‚РѕРІР°СЂРЅС‹Р№ Р·РЅР°Рє СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓСЋС‰РµРіРѕ РїСЂР°РІРѕРѕР±Р»Р°РґР°С‚РµР»СЏ; РґР°РЅРЅС‹Р№ РїСЂРѕРµРєС‚ РЅРµ Р°С„С„РёР»РёСЂРѕРІР°РЅ СЃ РЅРёРј.\n\nVB-CABLE вЂ” Р±РµСЃРїР»Р°С‚РЅС‹Р№ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ Р°СѓРґРёРѕРєР°Р±РµР»СЊ РѕС‚ VB-Audio; РѕРЅ РЅРµ РІС…РѕРґРёС‚ РІ РєРѕРјРїР»РµРєС‚ РїРѕСЃС‚Р°РІРєРё VibeDrop Рё РЅРµ СЃРІСЏР·Р°РЅ СЃ РµРіРѕ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєР°РјРё.\n\nР Р°Р·РґРµР» В«РњСѓР·С‹РєР°В» СЂР°Р±РѕС‚Р°РµС‚ СЃ РґРІСѓРјСЏ РѕС‚РґРµР»СЊРЅС‹РјРё РїСЂРѕРіСЂР°РјРјР°РјРё: yt-dlp (The Unlicense) Рё FFmpeg (GPL-2.0-or-later РІ РїРѕСЃС‚Р°РІР»СЏРµРјРѕР№ СЃР±РѕСЂРєРµ). РћРЅРё РЅРµ РІС…РѕРґСЏС‚ РІ VibeDrop, Р·Р°РїСѓСЃРєР°СЋС‚СЃСЏ РєР°Рє РѕР±С‹С‡РЅС‹Рµ РґРѕС‡РµСЂРЅРёРµ РїСЂРѕС†РµСЃСЃС‹ Рё РїРѕСЃС‚Р°РІР»СЏСЋС‚СЃСЏ СЂСЏРґРѕРј СЃ РїСЂРѕРіСЂР°РјРјРѕР№ РІ РїР°РїРєРµ tools. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё вЂ” РІ THIRD_PARTY_NOTICES.md.",
+                                "VibeDrop — независимый проект с открытым исходным кодом (лицензия Apache-2.0), вдохновлённый саундбордами в духе Soundpad. Soundpad — товарный знак соответствующего правообладателя; данный проект не аффилирован с ним.\n\nVB-CABLE — бесплатный виртуальный аудиокабель от VB-Audio; он не входит в комплект поставки VibeDrop и не связан с его разработчиками.\n\nРаздел «Музыка» работает с двумя отдельными программами: yt-dlp (The Unlicense) и FFmpeg (GPL-2.0-or-later в поставляемой сборке). Они не входят в VibeDrop, запускаются как обычные дочерние процессы и поставляются рядом с программой в папке tools. Подробности — в THIRD_PARTY_NOTICES.md.",
                             )
                             .size(12.5)
                             .color(theme::c_text_dim()),
@@ -5156,7 +5179,7 @@ fn mic_setup_steps(lang: &str) -> Vec<&'static str> {
                 "   pactl load-module module-null-sink sink_name=VibeDrop_Route",
                 "2. Press \"Refresh devices\" here, pick \"vibedrop_route\" as the microphone route above and press",
                 "   \"Test microphone route\".",
-                "3. In Discord, a game or a recorder pick \"VibeDrop Microphone (Virtual)\" as the microphone вЂ”",
+                "3. In Discord, a game or a recorder pick \"VibeDrop Microphone (Virtual)\" as the microphone —",
                 "   that is the cable's recording side, the VB-CABLE \"CABLE Output\" equivalent.",
                 "4. To let people hear your voice too, enable \"Mix my microphone into the microphone route\" and pick",
                 "   your real microphone.",
@@ -5289,14 +5312,14 @@ fn explain_devices(lang: &str, kind: DeviceKind, count: usize, error: Option<&st
     if let Some(e) = error {
         return Some(if windows {
             format!(
-                "Windows РЅРµ РІРµСЂРЅСѓР»Р° СЃРїРёСЃРѕРє СѓСЃС‚СЂРѕР№СЃС‚РІ {noun} ({}). РџСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ Р·Р°РїСѓС‰РµРЅР° СЃР»СѓР¶Р±Р° Windows Audio Рё \
-                 СѓСЃС‚Р°РЅРѕРІР»РµРЅ Р°СѓРґРёРѕРґСЂР°Р№РІРµСЂ, Р·Р°С‚РµРј РЅР°Р¶РјРёС‚Рµ В«РћР±РЅРѕРІРёС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°В».",
+                "Windows не нашла списка устройств {noun} ({}). Проверьте, что запущена служба Windows Audio и \
+                 установлен аудиодрайвер, затем нажмите «Обновить устройства».",
                 lang::tx(lang, e)
             )
         } else {
             format!(
-                "РЎРёСЃС‚РµРјР° РЅРµ РІРµСЂРЅСѓР»Р° СЃРїРёСЃРѕРє СѓСЃС‚СЂРѕР№СЃС‚РІ {noun} ({}). РџСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ Р·Р°РїСѓС‰РµРЅ Р·РІСѓРєРѕРІРѕР№ СЃРµСЂРІРµСЂ \
-                 (PipeWire РёР»Рё PulseAudio), Р·Р°С‚РµРј РЅР°Р¶РјРёС‚Рµ В«РћР±РЅРѕРІРёС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°В».",
+                "Система не нашла список устройств {noun} ({}). Проверьте, что запущен звуковой сервис \
+                 (PipeWire или PulseAudio), затем нажмите «Обновить устройства».",
                 lang::tx(lang, e)
             )
         });
@@ -5307,31 +5330,30 @@ fn explain_devices(lang: &str, kind: DeviceKind, count: usize, error: Option<&st
     if !windows {
         return Some(match kind {
             DeviceKind::Input => {
-                "РЎРёСЃС‚РµРјР° РЅРµ РІРёРґРёС‚ РЅРё РѕРґРЅРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР° Р·Р°РїРёСЃРё. РџРѕРґРєР»СЋС‡РёС‚Рµ РјРёРєСЂРѕС„РѕРЅ РёР»Рё РіР°СЂРЅРёС‚СѓСЂСѓ Рё РїСЂРѕРІРµСЂСЊС‚Рµ, \
-                 С‡С‚Рѕ РѕРЅ РЅРµ РІС‹РєР»СЋС‡РµРЅ Рё РЅРµ Р·Р°РіР»СѓС€РµРЅ РІ РЅР°СЃС‚СЂРѕР№РєР°С… Р·РІСѓРєР° (PipeWire/PulseAudio РёР»Рё ALSA), Р·Р°С‚РµРј \
-                 РЅР°Р¶РјРёС‚Рµ В«РћР±РЅРѕРІРёС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°В»."
+                "Система не видит ни одного устройства записи. Подключите микрофон или гарнитуру и проверьте, \
+                 что он не выбран в системе как «default» (PipeWire/PulseAudio или ALSA), затем \
+                 нажмите «Обновить устройства»."
                     .to_string()
             }
             DeviceKind::Output => {
-                "РЎРёСЃС‚РµРјР° РЅРµ РІРёРґРёС‚ РЅРё РѕРґРЅРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР° РІРѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёСЏ. РџРѕРґРєР»СЋС‡РёС‚Рµ РЅР°СѓС€РЅРёРєРё РёР»Рё РєРѕР»РѕРЅРєРё Рё \
-                 РїСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РІРєР»СЋС‡РµРЅРѕ РІ РЅР°СЃС‚СЂРѕР№РєР°С… Р·РІСѓРєР° (PipeWire/PulseAudio РёР»Рё ALSA), Р·Р°С‚РµРј \
-                 РЅР°Р¶РјРёС‚Рµ В«РћР±РЅРѕРІРёС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°В»."
+                "Система не видит ни одного устройства воспроизведения. Подключите наушники или колонки и \
+                 проверьте, что устройство вывода выбрано в системе как «default» (PipeWire/PulseAudio или ALSA), \
+                 затем нажмите «Обновить устройства»."
                     .to_string()
             }
         });
     }
     Some(match kind {
         DeviceKind::Input => {
-            "Windows РЅРµ РІРёРґРёС‚ РЅРё РѕРґРЅРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР° Р·Р°РїРёСЃРё. РџРѕРґРєР»СЋС‡РёС‚Рµ РјРёРєСЂРѕС„РѕРЅ РёР»Рё РіР°СЂРЅРёС‚СѓСЂСѓ Рё РїСЂРѕРІРµСЂСЊС‚Рµ \
-             РќР°СЃС‚СЂРѕР№РєРё > РЎРёСЃС‚РµРјР° > Р—РІСѓРє > Р’РІРѕРґ. Р’ РєР»Р°СЃСЃРёС‡РµСЃРєРѕР№ РїР°РЅРµР»Рё В«Р—РІСѓРєВ» (РІРєР»Р°РґРєР° В«Р—Р°РїРёСЃСЊВ») С‰С‘Р»РєРЅРёС‚Рµ РїСЂР°РІРѕР№ РєРЅРѕРїРєРѕР№ \
-             РјС‹С€Рё РїРѕ РїСѓСЃС‚РѕРјСѓ РјРµСЃС‚Сѓ Рё РІРєР»СЋС‡РёС‚Рµ В«РџРѕРєР°Р·Р°С‚СЊ РѕС‚РєР»СЋС‡С‘РЅРЅС‹Рµ СѓСЃС‚СЂРѕР№СЃС‚РІР°В», Р·Р°С‚РµРј РІРєР»СЋС‡РёС‚Рµ СЃРІРѕР№ РјРёРєСЂРѕС„РѕРЅ."
+            "Windows не видит ни одного устройства записи. Подключите микрофон или гарнитуру и проверьте \
+             «Звук» (вкладка «Запись») Свойства правой кнопкой мыши и включите «Показывать отключенные \
+             устройства», затем нажмите «Обновить устройства»."
                 .to_string()
         }
         DeviceKind::Output => {
-            "Windows РЅРµ РІРёРґРёС‚ РЅРё РѕРґРЅРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР° РІРѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёСЏ. РџРѕРґРєР»СЋС‡РёС‚Рµ РЅР°СѓС€РЅРёРєРё РёР»Рё РєРѕР»РѕРЅРєРё Рё РїСЂРѕРІРµСЂСЊС‚Рµ \
-             РќР°СЃС‚СЂРѕР№РєРё > РЎРёСЃС‚РµРјР° > Р—РІСѓРє > Р’С‹РІРѕРґ. Р’ РєР»Р°СЃСЃРёС‡РµСЃРєРѕР№ РїР°РЅРµР»Рё В«Р—РІСѓРєВ» (РІРєР»Р°РґРєР° В«Р’РѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёРµВ») С‰С‘Р»РєРЅРёС‚Рµ \
-             РїСЂР°РІРѕР№ РєРЅРѕРїРєРѕР№ РјС‹С€Рё РїРѕ РїСѓСЃС‚РѕРјСѓ РјРµСЃС‚Сѓ Рё РІРєР»СЋС‡РёС‚Рµ В«РџРѕРєР°Р·Р°С‚СЊ РѕС‚РєР»СЋС‡С‘РЅРЅС‹Рµ СѓСЃС‚СЂРѕР№СЃС‚РІР°В», Р·Р°С‚РµРј РІРєР»СЋС‡РёС‚Рµ \
-             СЃРІРѕС‘ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ."
+            "Windows не видит ни одного устройства воспроизведения. Подключите наушники или колонки и \
+             проверьте «Звук» (вкладка «Воспроизведение») Свойства правой кнопкой мыши и включите \
+             «Показывать отключенные устройства», затем нажмите «Обновить устройства»."
                 .to_string()
         }
     })

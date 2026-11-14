@@ -60,6 +60,8 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "Light" => "Светлая",
         "Accent colour" => "Акцентный цвет",
         "Open Colours" => "Открыть цвета",
+        "Open the official yt-dlp page" => "Открыть официальную страницу yt-dlp",
+        "Open the official FFmpeg page" => "Открыть официальную страницу FFmpeg",
         "Colours live on their own page now." => "Цвета теперь на своей странице.",
         "ACCENT COLOUR" => "АКЦЕНТНЫЙ ЦВЕТ",
         "BACKGROUND COLOUR" => "ЦВЕТ ФОНА",

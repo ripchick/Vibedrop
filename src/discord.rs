@@ -135,10 +135,63 @@ fn worker(rx: Receiver<Presence>, status: Arc<Mutex<DiscordStatus>>) {
                 if send_activity(&mut stream, pid, presence.as_ref()).is_err() {
                     break;
                 }
+                // Discord answers every command. Nobody reads those answers, so they pile up in
+                // the pipe until it is full - and then writing blocks for good, which is why the
+                // elapsed time used to freeze. Reading them away fixes that.
+                drain_answers(&mut stream);
                 last_sent = now;
                 last_sent_presence = last.clone();
             }
             std::thread::sleep(Duration::from_millis(400));
+        }
+    }
+}
+
+/// Throw away whatever Discord has sent so far without blocking.
+#[cfg(windows)]
+fn drain_answers(stream: &mut Transport) {
+    use std::os::windows::io::AsRawHandle;
+    use winapi::um::namedpipeapi::PeekNamedPipe;
+    use winapi::um::winnt::HANDLE;
+    match stream {
+        Transport::Windows(file) => {
+            let handle = file.as_raw_handle() as HANDLE;
+            let mut available: u32 = 0;
+            let ok = unsafe {
+                PeekNamedPipe(
+                    handle,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                    &mut available,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok != 0 && available > 0 {
+                let mut buffer = vec![0u8; available as usize];
+                use std::io::Read;
+                let _ = file.read(&mut buffer);
+            }
+        }
+    }
+}
+
+/// Throw away whatever Discord has sent so far without blocking.
+#[cfg(not(windows))]
+fn drain_answers(stream: &mut Transport) {
+    use std::io::Read;
+    match stream {
+        Transport::Unix(socket) => {
+            let _ = socket.set_read_timeout(Some(Duration::from_millis(1)));
+            let mut buffer = [0u8; 4096];
+            loop {
+                match socket.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+            let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
         }
     }
 }

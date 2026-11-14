@@ -40,7 +40,7 @@ percent-encoding = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
-winapi = { version = "0.3", features = ["fileapi", "handleapi", "winnt"] }
+winapi = { version = "0.3", features = ["fileapi", "handleapi", "winnt", "namedpipeapi"] }
 
 # File dialogs exist on desktop only (rfd has no Android backend).
 [target.'cfg(not(target_os = "android"))'.dependencies]

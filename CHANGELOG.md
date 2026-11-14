@@ -5,16 +5,18 @@
 ## 0.14.0
 
 ### Added
-- **A separate Colors page** with colour pickers for the accent and the background, plus
-  a toggle for animations. The accent colour text field is gone from the Appearance card.
-- **Background colour** can now be changed; the panels use it when set.
-- **Page transition fade-in** (and hover animations) when animations are enabled.
-- **Discord Rich Presence**: the elapsed time no longer freezes and jumps back; the start
-  time is kept stable while a track or a sound keeps playing.
+- Buttons in Settings -> Music that open the official download pages of yt-dlp and FFmpeg,
+  the same way the VB-CABLE button opens the official cable page.
+
+### Fixed
+- Discord Rich Presence no longer freezes: the answers of Discord are read away again, so the
+  pipe cannot fill up and block the writes.
+- The Russian texts that were damaged by a wrong encoding (for example the language selector)
+  are proper UTF-8 again.
 
 ### Changed
-- The accent colour field no longer tries to keep a half-typed value: it uses a colour
-  picker instead, so typing is never lost.
+- yt-dlp and FFmpeg are **not** part of the release archives any more. They are separate
+  programs with their own licenses; VibeDrop only opens their official download pages.
 
 ## 0.13.2
 

@@ -14,6 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// Where yt-dlp is downloaded (the releases page with the ready-made executables).
+pub const YT_DLP_PAGE: &str = "https://github.com/yt-dlp/yt-dlp/releases";
+/// Where FFmpeg is downloaded (the official download page with the Windows/macOS/Linux builds).
+pub const FFMPEG_PAGE: &str = "https://ffmpeg.org/download.html";
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tools {
     pub yt_dlp: Option<PathBuf>,
