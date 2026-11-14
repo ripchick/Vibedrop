@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.14.0
+
+### Added
+- **A separate Colors page** with colour pickers for the accent and the background, plus
+  a toggle for animations. The accent colour text field is gone from the Appearance card.
+- **Background colour** can now be changed; the panels use it when set.
+- **Page transition fade-in** (and hover animations) when animations are enabled.
+- **Discord Rich Presence**: the elapsed time no longer freezes and jumps back; the start
+  time is kept stable while a track or a sound keeps playing.
+
+### Changed
+- The accent colour field no longer tries to keep a half-typed value: it uses a colour
+  picker instead, so typing is never lost.
+
 ## 0.13.2
 
 ### Added

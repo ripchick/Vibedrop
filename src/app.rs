@@ -91,15 +91,17 @@ enum Page {
     Favorites,
     Music,
     History,
+    Colors,
     Settings,
 }
 
 impl Page {
-    const ALL: [Page; 5] = [
+    const ALL: [Page; 6] = [
         Page::Library,
         Page::Favorites,
         Page::Music,
         Page::History,
+        Page::Colors,
         Page::Settings,
     ];
 
@@ -109,6 +111,7 @@ impl Page {
             Page::Favorites => "Favorites",
             Page::Music => "Music",
             Page::History => "History",
+            Page::Colors => "Colors",
             Page::Settings => "Settings",
         }
     }
@@ -119,6 +122,7 @@ impl Page {
             Page::Favorites => Icon::Star,
             Page::Music => Icon::Music,
             Page::History => Icon::History,
+            Page::Colors => Icon::Palette,
             Page::Settings => Icon::Settings,
         }
     }
@@ -294,6 +298,10 @@ pub struct VibeDropApp {
     /// wiped on every save. The text being typed therefore lives here and is applied to the
     /// settings as soon as it is a valid colour.
     accent_input: String,
+    presence_started: Option<(String, i64)>,
+    /// When the current page was opened, for the fade-in animation.
+    page_anim_start: Option<Instant>,
+    last_page: Page,
 
     rename: Option<RenameDialog>,
     hotkey_dialog: Option<HotkeyDialog>,
@@ -403,6 +411,9 @@ impl VibeDropApp {
             discord,
             applied_theme,
             accent_input: String::new(),
+            presence_started: None,
+            page_anim_start: Some(Instant::now()),
+            last_page: Page::Library,
             rename: None,
             hotkey_dialog: None,
             url_dialog: None,
@@ -2423,6 +2434,27 @@ impl VibeDropApp {
     }
 
     fn draw_central(&mut self, ctx: &egui::Context) {
+        // Detect a page change and start the fade-in animation.
+        if self.page != self.last_page {
+            self.last_page = self.page;
+            if self.settings.theme.animations {
+                self.page_anim_start = Some(Instant::now());
+            } else {
+                self.page_anim_start = None;
+            }
+        }
+        let opacity = match self.page_anim_start {
+            Some(start) => {
+                let t = start.elapsed().as_secs_f32() / 0.15;
+                if t >= 1.0 {
+                    self.page_anim_start = None;
+                    1.0
+                } else {
+                    t.clamp(0.0, 1.0)
+                }
+            }
+            None => 1.0,
+        };
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
@@ -2430,11 +2462,13 @@ impl VibeDropApp {
                     .inner_margin(egui::Margin::symmetric(26.0, 20.0)),
             )
             .show(ctx, |ui| {
+                ui.set_opacity(opacity);
                 self.draw_alert_banner(ui);
                 match self.page {
                     Page::Library | Page::Favorites => self.draw_sound_page(ui),
                     Page::Music => self.draw_music_page(ui),
                     Page::History => self.draw_history_page(ui),
+                    Page::Colors => self.draw_colors_page(ui),
                     Page::Settings => self.draw_settings_page(ui),
                 }
             });
@@ -2888,7 +2922,27 @@ impl VibeDropApp {
                 } else {
                     Some(lang::t(&self.settings.language, "Music").to_string())
                 };
-                let started = playing.then(|| (unix_now() as i64).saturating_sub(pos.round() as i64));
+                // Keep the start time stable: recompute it only when the track (re)starts,
+                // so the elapsed time in Discord does not jump back every 15 seconds.
+                let key = format!("music:{}", track.id);
+                let started = if playing {
+                    Some(match &self.presence_started {
+                        Some((k, s)) if k == &key && pos < 1.0 => {
+                            let s = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                            self.presence_started = Some((key.clone(), s));
+                            s
+                        }
+                        Some((k, s)) if k == &key => *s,
+                        _ => {
+                            let s = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                            self.presence_started = Some((key.clone(), s));
+                            s
+                        }
+                    })
+                } else {
+                    self.presence_started = None;
+                    None
+                };
                 self.discord.set(Some(name), state, started);
                 return;
             }
@@ -2900,6 +2954,9 @@ impl VibeDropApp {
             .map(|e| e.name.clone());
         let playing = self.now_playing.as_deref().is_some_and(|id| self.engine.is_playing(id));
         let progress = self.now_playing.as_deref().and_then(|id| self.engine.progress(id));
+        if !playing {
+            self.presence_started = None;
+        }
         let (details, state, started) = match (&now_name, playing, progress) {
             (Some(name), true, Some((pos, total))) => {
                 let state = if total > 0.0 {
@@ -2907,7 +2964,20 @@ impl VibeDropApp {
                 } else {
                     theme::fmt_time(pos)
                 };
-                let started = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                let key = self.now_playing.clone().unwrap_or_default();
+                let started = match &self.presence_started {
+                    Some((k, s)) if k == &key && pos < 1.0 => {
+                        let s = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                        self.presence_started = Some((key.clone(), s));
+                        s
+                    }
+                    Some((k, s)) if k == &key => *s,
+                    _ => {
+                        let s = (unix_now() as i64).saturating_sub(pos.round() as i64);
+                        self.presence_started = Some((key.clone(), s));
+                        s
+                    }
+                };
                 (Some(name.clone()), Some(state), Some(started))
             }
             (Some(name), _, _) => (Some(name.clone()), None, None),
@@ -4176,76 +4246,14 @@ impl VibeDropApp {
                         }
                     });
                     ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(lang::t(&lang, "Accent colour")).strong());
-                        // The field keeps the text that is being typed; the settings only receive
-                        // it once it is a complete colour, so a half-typed value is not lost.
-                        if self.accent_input.is_empty() {
-                            self.accent_input = if self.settings.theme.accent.is_empty() {
-                                theme::hex_color(theme::default_accent(&self.settings.theme.variant))
-                            } else {
-                                self.settings.theme.accent.clone()
-                            };
-                        }
-                        let resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.accent_input)
-                                .desired_width(110.0)
-                                .hint_text("#2E9BE6"),
-                        );
-                        let mut invalid = false;
-                        if resp.changed() {
-                            let text = self.accent_input.trim().to_string();
-                            match theme::parse_color(&text) {
-                                Some(color) => {
-                                    let hex = theme::hex_color(color);
-                                    self.accent_input = hex.clone();
-                                    self.settings.theme.accent = hex;
-                                    self.settings_dirty = true;
-                                }
-                                None => {
-                                    if text.is_empty() {
-                                        // The hex code is permanent: clearing the box puts the
-                                        // colour that is currently in use right back.
-                                        self.accent_input = if self.settings.theme.accent.is_empty() {
-                                            theme::hex_color(theme::default_accent(&self.settings.theme.variant))
-                                        } else {
-                                            self.settings.theme.accent.clone()
-                                        };
-                                    } else {
-                                        invalid = true;
-                                    }
-                                }
-                            }
-                        }
-                        if invalid {
-                            ui.label(
-                                RichText::new(lang::t(&lang, "Use a colour like #2E9BE6"))
-                                    .size(11.5)
-                                    .color(theme::c_warning()),
-                            );
-                        }
-                        for (name, color) in [
-                            ("Blue", Color32::from_rgb(0x2E, 0x9B, 0xE6)),
-                            ("Teal", Color32::from_rgb(0x2E, 0xC4, 0xB6)),
-                            ("Amber", Color32::from_rgb(0xE6, 0x9B, 0x2E)),
-                            ("Green", Color32::from_rgb(0x63, 0xC4, 0x54)),
-                            ("Pink", Color32::from_rgb(0xE6, 0x5B, 0x9B)),
-                        ] {
-                            if ui
-                                .selectable_label(
-                                    self.settings.theme.accent.is_empty()
-                                        && theme::c_accent() == color,
-                                    name,
-                                )
-                                .clicked()
-                            {
-                                let hex = theme::hex_color(color);
-                                self.accent_input = hex.clone();
-                                self.settings.theme.accent = hex;
-                                self.settings_dirty = true;
-                            }
-                        }
-                    });
+                    ui.label(
+                        RichText::new(lang::t(&lang, "Colours live on their own page now."))
+                            .size(12.5)
+                            .color(theme::c_text_dim()),
+                    );
+                    if theme::secondary_button(ui, lang::t(&lang, "Open Colours")).clicked() {
+                        self.page = Page::Colors;
+                    }
                     ui.add_space(6.0);
                     let mut radius = self.settings.theme.corner_radius;
                     if ui
@@ -5021,6 +5029,100 @@ impl VibeDropApp {
         if !open {
             self.about = false;
         }
+    }
+
+    fn draw_colors_page(&mut self, ui: &mut Ui) {
+        let lang = self.settings.language.clone();
+        page_header(
+            ui,
+            lang::t(&lang, "Colors"),
+            lang::t(&lang, "Accent, background and the colours used across the interface."),
+            |_ui| {},
+        );
+        ui.add_space(12.0);
+
+        // Accent colour.
+        theme::frame_card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_title(ui, lang::t(&lang, "ACCENT COLOUR"));
+            ui.label(
+                RichText::new(lang::t(
+                    &lang,
+                    "The colour of the buttons, the slider track and the progress bar.",
+                ))
+                .size(12.5)
+                .color(theme::c_text_dim()),
+            );
+            ui.add_space(6.0);
+            let mut accent = theme::parse_color(&self.settings.theme.accent).unwrap_or_else(theme::c_accent);
+            if ui.color_edit_button_srgba(&mut accent).changed() {
+                self.settings.theme.accent = format!("#{:02X}{:02X}{:02X}", accent.r(), accent.g(), accent.b());
+                self.settings_dirty = true;
+            }
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                for (name, color) in [
+                    ("Blue", Color32::from_rgb(0x2E, 0x9B, 0xE6)),
+                    ("Teal", Color32::from_rgb(0x2E, 0xC4, 0xB6)),
+                    ("Amber", Color32::from_rgb(0xE6, 0x9B, 0x2E)),
+                    ("Green", Color32::from_rgb(0x63, 0xC4, 0x54)),
+                    ("Pink", Color32::from_rgb(0xE6, 0x5B, 0x9B)),
+                ] {
+                    if theme::secondary_button(ui, lang::t(&lang, name)).clicked() {
+                        let hex = format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
+                        self.settings.theme.accent = hex;
+                        self.settings_dirty = true;
+                    }
+                }
+            });
+        });
+
+        ui.add_space(12.0);
+
+        // Background colour.
+        theme::frame_card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_title(ui, lang::t(&lang, "BACKGROUND COLOUR"));
+            ui.label(
+                RichText::new(lang::t(
+                    &lang,
+                    "The colour behind the panels. Leave the default if you are not sure.",
+                ))
+                .size(12.5)
+                .color(theme::c_text_dim()),
+            );
+            ui.add_space(6.0);
+            let default_bg = theme::c_bg();
+            let mut bg = theme::parse_color(&self.settings.theme.bg).unwrap_or(default_bg);
+            if ui.color_edit_button_srgba(&mut bg).changed() {
+                self.settings.theme.bg = format!("#{:02X}{:02X}{:02X}", bg.r(), bg.g(), bg.b());
+                self.settings_dirty = true;
+            }
+            ui.add_space(4.0);
+            if theme::secondary_button(ui, lang::t(&lang, "Reset to default")).clicked() {
+                self.settings.theme.bg.clear();
+                self.settings_dirty = true;
+            }
+        });
+
+        ui.add_space(12.0);
+
+        // Animation.
+        theme::frame_card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_title(ui, lang::t(&lang, "ANIMATIONS"));
+            ui.label(
+                RichText::new(lang::t(&lang, "Smooth transitions between pages and on hover."))
+                    .size(12.5)
+                    .color(theme::c_text_dim()),
+            );
+            ui.add_space(6.0);
+            let mut anim = self.settings.theme.animations;
+            if ui.checkbox(&mut anim, lang::t(&lang, "Enable animations")).changed() {
+                self.settings.theme.animations = anim;
+                self.settings_dirty = true;
+            }
+        });
     }
 
     /// The confirmation window for "Clear data".
