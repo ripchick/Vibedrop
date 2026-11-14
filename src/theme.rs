@@ -241,9 +241,6 @@ pub fn palette_for(settings: &crate::settings::ThemeSettings) -> Palette {
         p.accent_dim = dim_of(custom);
         p.accent_fill = fill_of(custom);
     }
-    if let Some(custom) = parse_color(&settings.bg) {
-        p.bg = custom;
-    }
     p
 }
 // ---- egui style ------------------------------------------------------------------------------
@@ -560,8 +557,6 @@ pub enum Icon {
     Wrench,
     /// Music note (Music section).
     Music,
-    /// Palette / colours.
-    Palette,
     /// Previous track.
     Previous,
     /// Next track.
@@ -812,17 +807,6 @@ pub fn paint_icon(p: &egui::Painter, icon: Icon, c: Pos2, s: f32, color: Color32
                 Stroke::NONE,
             ));
             p.circle_filled(Pos2::new(c.x - s * 0.10, c.y + s * 0.24), s * 0.17, color);
-        }
-        Icon::Palette => {
-            // A small colour wheel: an arc of the accent with three dots.
-            p.circle_stroke(Pos2::new(c.x, c.y), s * 0.40, Stroke::new(1.4_f32, color));
-            for (dx, dy, col) in [
-                (-0.22, -0.12, Color32::from_rgb(0x2E, 0x9B, 0xE6)),
-                (0.18, -0.18, Color32::from_rgb(0x63, 0xC4, 0x54)),
-                (0.10, 0.22, Color32::from_rgb(0xE6, 0x9B, 0x2E)),
-            ] {
-                p.circle_filled(Pos2::new(c.x + dx * s, c.y + dy * s), s * 0.13, col);
-            }
         }
         Icon::Previous => {
             let h = s * 0.34;

@@ -87,8 +87,6 @@ pub struct ThemeSettings {
     pub variant: String,
     /// Accent colour as `#RRGGBB`; empty = the built-in accent.
     pub accent: String,
-    /// Background colour as `#RRGGBB`; empty = the built-in background.
-    pub bg: String,
     /// Corner rounding of cards and panels, in pixels (0..=24).
     pub corner_radius: f32,
     /// Base font size in points (12..=20).
@@ -113,7 +111,6 @@ impl Default for ThemeSettings {
         Self {
             variant: "dark".to_string(),
             accent: String::new(),
-            bg: String::new(),
             corner_radius: 8.0,
             font_scale: 15.0,
             show_sidebar_labels: true,
@@ -281,9 +278,6 @@ impl Settings {
         }
         if !self.theme.accent.is_empty() && !is_hex_color(&self.theme.accent) {
             self.theme.accent.clear();
-        }
-        if !self.theme.bg.is_empty() && !is_hex_color(&self.theme.bg) {
-            self.theme.bg.clear();
         }
         self.theme.corner_radius = self.theme.corner_radius.clamp(0.0, 24.0);
         self.theme.font_scale = if self.theme.font_scale.is_finite() {
