@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.14.3
+
+### Added
+- Discord Rich Presence now shows the cover of the album that is playing as its picture, with
+  the track title as the tooltip. The elapsed time runs on a progress bar (start and end times
+  are sent), so it no longer freezes.
+
+### Fixed
+- Discord Rich Presence: the elapsed time used to freeze and jump back because Discord answers
+  every command and nobody read those answers, so they piled up in the pipe until it was full
+  and the writes blocked. The answers are read away after every update.
+- The Russian texts that were damaged by a wrong encoding are proper UTF-8 again.
+
 ## 0.14.2
 
 ### Added

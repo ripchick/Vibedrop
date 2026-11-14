@@ -3199,10 +3199,12 @@ impl VibeDropApp {
                     None
                 };
                 let album = self.music_player.album_id().and_then(|id| self.music.get(id)).cloned();
-                self.discord.set_with_image(
+                let ended = playing.then(|| started.unwrap_or(0) + total.round() as i64);
+                self.discord.set(
                     Some(name),
                     state,
                     started,
+                    ended,
                     album.as_ref().and_then(|a| a.cover_url.clone()),
                     Some(track.title.clone()),
                 );
@@ -3219,7 +3221,7 @@ impl VibeDropApp {
         if !playing {
             self.presence_started = None;
         }
-        let (details, state, started) = match (&now_name, playing, progress) {
+        let (details, state, started, ended) = match (&now_name, playing, progress) {
             (Some(name), true, Some((pos, total))) => {
                 let state = if total > 0.0 {
                     format!("{} / {}", theme::fmt_time(pos), theme::fmt_time(total))
@@ -3240,12 +3242,13 @@ impl VibeDropApp {
                         s
                     }
                 };
-                (Some(name.clone()), Some(state), Some(started))
+                let ended = started + total.round() as i64;
+                (Some(name.clone()), Some(state), Some(started), Some(ended))
             }
-            (Some(name), _, _) => (Some(name.clone()), None, None),
-            (None, _, _) => (None, None, None),
+            (Some(name), _, _) => (Some(name.clone()), None, None, None),
+            (None, _, _) => (None, None, None, None),
         };
-        self.discord.set(details, state, started);
+        self.discord.set(details, state, started, ended, None, None);
     }
 
     // ---- Drawing: music ----------------------------------------------------------------------
