@@ -424,37 +424,72 @@ pub fn section_title(ui: &mut Ui, text: &str) {
 
 // ---- Text buttons ----------------------------------------------------------------------------
 
+/// A smoothly animated 0..1 value: 1 while the widget is hovered, 0 otherwise.
+///
+/// The value is remembered by egui between frames, so the effect eases in and out instead of
+/// snapping.
+pub fn hover_anim(ui: &Ui, id: egui::Id, hovered: bool) -> f32 {
+    ui.ctx()
+        .animate_bool_with_time_and_easing(id, hovered, 0.14, egui::emath::easing::cubic_out)
+}
+
+/// The same colour with a different alpha.
+pub fn with_alpha(color: Color32, alpha: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (alpha.clamp(0.0, 1.0) * 255.0) as u8)
+}
+
+/// A gentle glow around a widget while the mouse rests on it.
+pub fn hover_glow(ui: &Ui, rect: Rect, color: Color32, amount: f32) {
+    if amount <= 0.01 {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect.expand(2.0),
+        Rounding::same(14.0),
+        Stroke::new(1.4_f32, with_alpha(color, amount * 0.85)),
+    );
+}
+
 /// Filled amber call-to-action button.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
-    ui.add(
+    let id = ui.next_auto_id();
+    let response = ui.add(
         egui::Button::new(RichText::new(text).color(c_bg()).strong())
             .fill(c_accent())
             .stroke(Stroke::NONE)
             .rounding(Rounding::same(12.0)),
-    )
-    .on_hover_cursor(CursorIcon::PointingHand)
+    );
+    let anim = hover_anim(ui, id, response.hovered());
+    hover_glow(ui, response.rect, c_accent_hover(), anim);
+    response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Outlined neutral button.
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
-    ui.add(
+    let id = ui.next_auto_id();
+    let response = ui.add(
         egui::Button::new(RichText::new(text).color(c_text()))
             .fill(c_card_hover())
             .stroke(Stroke::new(1.0_f32, c_border()))
             .rounding(Rounding::same(12.0)),
-    )
-    .on_hover_cursor(CursorIcon::PointingHand)
+    );
+    let anim = hover_anim(ui, id, response.hovered());
+    hover_glow(ui, response.rect, c_accent(), anim * 0.55);
+    response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Red-tinted button for destructive actions.
 pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
-    ui.add(
+    let id = ui.next_auto_id();
+    let response = ui.add(
         egui::Button::new(RichText::new(text).color(c_danger()).strong())
             .fill(Color32::from_rgb(0x3B, 0x1B, 0x1B))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgb(0x6B, 0x2B, 0x2B)))
             .rounding(Rounding::same(12.0)),
-    )
-    .on_hover_cursor(CursorIcon::PointingHand)
+    );
+    let anim = hover_anim(ui, id, response.hovered());
+    hover_glow(ui, response.rect, c_danger(), anim * 0.7);
+    response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Pill-shaped label that can be clicked (used for hotkeys).
@@ -969,9 +1004,12 @@ pub fn round_button(ui: &mut Ui, icon: Icon, diameter: f32, primary: bool, enabl
 
 /// Sidebar navigation row. `show_label` = false draws only the icon.
 pub fn nav_item(ui: &mut Ui, icon: Icon, label: &str, selected: bool, show_label: bool) -> Response {
+    let id = ui.next_auto_id();
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let hovered = resp.hovered();
+        // The hover background fades in and out instead of snapping.
+        let anim = hover_anim(ui, id, hovered);
         let p = ui.painter();
         if selected {
             p.rect_filled(rect, Rounding::same(10.0), c_accent_fill());
@@ -983,8 +1021,8 @@ pub fn nav_item(ui: &mut Ui, icon: Icon, label: &str, selected: bool, show_label
                 Rounding::same(2.0),
                 c_accent(),
             );
-        } else if hovered {
-            p.rect_filled(rect, Rounding::same(10.0), c_card());
+        } else if anim > 0.01 {
+            p.rect_filled(rect, Rounding::same(10.0), with_alpha(c_card(), anim));
         }
         let color = if selected {
             c_accent()

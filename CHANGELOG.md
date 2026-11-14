@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.14.1
+
+### Added
+- Discord Rich Presence shows the cover of the album that is playing. Discord accepts a direct
+  picture address in the activity, so no upload to the developer portal is needed; the title of
+  the track is the tooltip of the picture.
+
+### Changed
+- Smoother animations: the page transition is a 320 ms ease-in-out, the buttons and the sidebar
+  glow and fade in and out on hover, the notifications fade in and out, and the bar next to a
+  playing sound pulses gently.
+
 ## 0.14.0
 
 ### Added

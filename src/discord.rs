@@ -24,6 +24,11 @@ struct Presence {
     details: Option<String>,
     state: Option<String>,
     started: Option<i64>,
+    /// The picture shown next to the activity. Discord accepts a direct image address here, so
+    /// the cover of the album that is playing can be shown.
+    image: Option<String>,
+    /// The tooltip of that picture.
+    image_text: Option<String>,
 }
 
 pub struct DiscordPresence {
@@ -48,10 +53,35 @@ impl DiscordPresence {
 
     /// Non-blocking; drops the update if the worker is busy.
     pub fn set(&self, details: Option<String>, state: Option<String>, started: Option<i64>) {
+        self.set_full(details, state, started, None, None);
+    }
+
+    /// Like [`DiscordPresence::set`], but with a picture (a direct image address).
+    pub fn set_with_image(
+        &self,
+        details: Option<String>,
+        state: Option<String>,
+        started: Option<i64>,
+        image: Option<String>,
+        image_text: Option<String>,
+    ) {
+        self.set_full(details, state, started, image, image_text);
+    }
+
+    fn set_full(
+        &self,
+        details: Option<String>,
+        state: Option<String>,
+        started: Option<i64>,
+        image: Option<String>,
+        image_text: Option<String>,
+    ) {
         let _ = self.tx.try_send(Presence {
             details,
             state,
             started,
+            image,
+            image_text,
         });
     }
 
@@ -125,7 +155,9 @@ fn worker(rx: Receiver<Presence>, status: Arc<Mutex<DiscordStatus>>) {
             }
             let now = std::time::Instant::now();
             let changed = match (&last, &last_sent_presence) {
-                (Some(a), Some(b)) => a.details != b.details || a.state != b.state || a.started != b.started,
+                (Some(a), Some(b)) => {
+                    a.details != b.details || a.state != b.state || a.started != b.started || a.image != b.image
+                }
                 (Some(_), None) => true,
                 (None, Some(_)) => true,
                 (None, None) => false,
@@ -228,6 +260,12 @@ fn handshake(stream: &mut Transport) -> std::io::Result<()> {
 }
 
 fn send_activity(stream: &mut Transport, pid: u32, presence: Option<&Presence>) -> std::io::Result<()> {
+    let payload = activity_payload(pid, presence);
+    write_frame(stream, 1, &payload)
+}
+
+/// The JSON of one SET_ACTIVITY command.
+fn activity_payload(pid: u32, presence: Option<&Presence>) -> String {
     let activity = match presence {
         Some(p) if p.details.is_some() => {
             let details = p.details.as_deref().unwrap_or_default();
@@ -236,9 +274,21 @@ fn send_activity(stream: &mut Transport, pid: u32, presence: Option<&Presence>) 
                 Some(s) => format!(",\"timestamps\":{{\"start\":{s}}}"),
                 None => String::new(),
             };
+            // The picture: the cover of the album that is playing (a direct address) or the
+            // application's own logo.
+            let assets = match p.image.as_deref() {
+                Some(url) if !url.is_empty() => {
+                    let text = match p.image_text.as_deref() {
+                        Some(t) if !t.is_empty() => format!(",\"large_text\":{}", json_str(t)),
+                        _ => String::new(),
+                    };
+                    format!("\"assets\":{{\"large_image\":{}{text}}}", json_str(url))
+                }
+                _ => "\"assets\":{\"large_image\":\"logo\"}".to_string(),
+            };
             format!(
                 "{{\"name\":\"{ACTIVITY_NAME}\",\"type\":2,\"application_id\":\"{CLIENT_ID}\",\
-                 \"details\":{},\"state\":{},\"assets\":{{\"large_image\":\"logo\"}}{timestamps},\
+                 \"details\":{},\"state\":{},{assets}{timestamps},\
                  \"instance\":true}}",
                 json_str(details),
                 json_str(state),
@@ -249,11 +299,10 @@ fn send_activity(stream: &mut Transport, pid: u32, presence: Option<&Presence>) 
              \"assets\":{{\"large_image\":\"logo\"}},\"instance\":true}}"
         ),
     };
-    let payload = format!(
+    format!(
         "{{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"{}\",\"args\":{{\"pid\":{pid},\"activity\":{activity}}}}}",
         nonce()
-    );
-    write_frame(stream, 1, &payload)
+    )
 }
 
 fn json_str(s: &str) -> String {
@@ -311,4 +360,50 @@ fn connect() -> Option<Transport> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn presence(image: Option<&str>) -> Presence {
+        Presence {
+            details: Some("Кино - Спокойная ночь".to_string()),
+            state: Some("0:03 / 3:34".to_string()),
+            started: Some(1_700_000_000),
+            image: image.map(str::to_string),
+            image_text: Some("Спокойная ночь".to_string()),
+        }
+    }
+
+    #[test]
+    fn the_cover_is_sent_as_the_picture() {
+        let url = "https://image-cdn-fa.spotifycdn.com/image/ab67616d0000b273";
+        let payload = activity_payload(42, Some(&presence(Some(url))));
+        assert!(payload.contains("\"cmd\":\"SET_ACTIVITY\""), "{payload}");
+        assert!(payload.contains(&format!("\"large_image\":\"{url}\"")), "{payload}");
+        assert!(payload.contains("\"large_text\":\"Спокойная ночь\""), "{payload}");
+        assert!(payload.contains("\"start\":1700000000"), "{payload}");
+        // The payload has to be valid JSON.
+        let value: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
+        let activity = &value["args"]["activity"];
+        assert_eq!(activity["type"], 2);
+        assert_eq!(activity["details"], "Кино - Спокойная ночь");
+    }
+
+    #[test]
+    fn without_a_cover_the_logo_is_shown() {
+        let payload = activity_payload(42, Some(&presence(None)));
+        assert!(payload.contains("\"large_image\":\"logo\""), "{payload}");
+        let value: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
+        assert_eq!(value["args"]["activity"]["assets"]["large_image"], "logo");
+    }
+
+    #[test]
+    fn without_a_track_only_the_application_is_shown() {
+        let payload = activity_payload(42, None);
+        let value: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
+        assert_eq!(value["args"]["activity"]["type"], 0);
+        assert_eq!(value["args"]["activity"]["assets"]["large_image"], "logo");
+    }
 }

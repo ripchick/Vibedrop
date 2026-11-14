@@ -135,6 +135,8 @@ struct Toast {
     kind: ToastKind,
     text: String,
     until: Instant,
+    /// When the toast appeared, for the fade-in.
+    born: Instant,
 }
 
 #[derive(Clone)]
@@ -516,10 +518,12 @@ impl VibeDropApp {
         if kind == ToastKind::Error {
             tracing::warn!("{text}");
         }
+        let now = Instant::now();
         self.toasts.push(Toast {
             kind,
             text,
-            until: Instant::now() + TOAST_LIFETIME,
+            until: now + TOAST_LIFETIME,
+            born: now,
         });
         if self.toasts.len() > MAX_TOASTS {
             self.toasts.remove(0);
@@ -2441,9 +2445,13 @@ impl VibeDropApp {
         }
         let opacity = match self.page_anim_start {
             Some(start) => {
-                let t = (start.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0);
-                // Cubic ease-out: starts fast, settles gently.
-                let eased = 1.0 - (1.0 - t).powi(3);
+                let t = (start.elapsed().as_secs_f32() / 0.32).clamp(0.0, 1.0);
+                // Smooth ease-in-out: it starts gently, speeds up and settles quietly.
+                let eased = if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+                };
                 if t >= 1.0 {
                     self.page_anim_start = None;
                 }
@@ -2717,7 +2725,11 @@ impl VibeDropApp {
                 ui.set_min_height(38.0);
                 if row.playing {
                     let (bar, _) = ui.allocate_exact_size(vec2(3.0, 32.0), Sense::hover());
-                    ui.painter().rect_filled(bar, Rounding::same(2.0), theme::c_accent());
+                    // A gentle pulse, so it is obvious that the sound is playing.
+                    let t = ui.input(|i| i.time) as f32;
+                    let pulse = 0.45 + 0.55 * (t * 2.4).sin().abs();
+                    ui.painter()
+                        .rect_filled(bar, Rounding::same(2.0), theme::with_alpha(theme::c_accent(), pulse));
                 }
                 ui.add_sized(
                     vec2(28.0, 20.0),
@@ -2938,7 +2950,14 @@ impl VibeDropApp {
                     self.presence_started = None;
                     None
                 };
-                self.discord.set(Some(name), state, started);
+                let album = self.music_player.album_id().and_then(|id| self.music.get(id)).cloned();
+                self.discord.set_with_image(
+                    Some(name),
+                    state,
+                    started,
+                    album.as_ref().and_then(|a| a.cover_url.clone()),
+                    Some(track.title.clone()),
+                );
                 return;
             }
         }
@@ -5106,7 +5125,9 @@ impl VibeDropApp {
 
     fn draw_toasts(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
-        self.toasts.retain(|t| t.until > now);
+        // Keep the toast a moment longer so it can fade out.
+        self.toasts
+            .retain(|t| t.until + std::time::Duration::from_millis(320) > now);
         if self.toasts.is_empty() {
             return;
         }
@@ -5122,12 +5143,17 @@ impl VibeDropApp {
                         ToastKind::Success => theme::c_accent(),
                         ToastKind::Error => theme::c_danger(),
                     };
+                    // Fade in when it appears and out when it disappears.
+                    let fade_in = (now.duration_since(toast.born).as_secs_f32() / 0.18).clamp(0.0, 1.0);
+                    let fade_out = (toast.until.duration_since(now).as_secs_f32() / 0.30).clamp(0.0, 1.0);
+                    let opacity = (fade_in * fade_out).clamp(0.0, 1.0);
                     egui::Frame::none()
                         .fill(theme::c_card())
                         .stroke(Stroke::new(1.0_f32, accent))
                         .rounding(10.0)
                         .inner_margin(egui::Margin::symmetric(14.0, 10.0))
                         .show(ui, |ui| {
+                            ui.set_opacity(opacity);
                             ui.set_max_width(380.0);
                             ui.label(RichText::new(&toast.text).color(theme::c_text()));
                         });
