@@ -322,6 +322,7 @@ pub struct VibeDropApp {
     protocol_state: ProtocolState,
 
     /// The tray icon, created the first time the window is closed into the tray.
+    #[cfg(not(target_os = "android"))]
     tray: Option<crate::tray::Tray>,
     /// The newest version found by the update check.
     update_rx: Receiver<Option<String>>,
@@ -452,6 +453,7 @@ impl VibeDropApp {
             url_dialog: None,
             clear_data_dialog: false,
             protocol_state: system::protocol_state(),
+            #[cfg(not(target_os = "android"))]
             tray: None,
             update_rx: upd_rx,
             update_tx: upd_tx,
@@ -2113,8 +2115,16 @@ impl VibeDropApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
                 CloseBehavior::Tray => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                    self.hide_to_tray(ctx);
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                        self.hide_to_tray(ctx);
+                    }
+                    #[cfg(target_os = "android")]
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
                 }
                 CloseBehavior::Exit => {}
             }
@@ -2122,6 +2132,7 @@ impl VibeDropApp {
     }
 
     /// Hide the window and keep VibeDrop running in the tray.
+    #[cfg(not(target_os = "android"))]
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
         if self.tray.is_none() {
             self.tray = crate::tray::Tray::new();
@@ -2144,6 +2155,7 @@ impl VibeDropApp {
     }
 
     /// What the user chose in the tray menu.
+    #[cfg(not(target_os = "android"))]
     fn handle_tray(&mut self, ctx: &egui::Context) {
         let Some(tray) = self.tray.as_ref() else {
             return;
@@ -5915,6 +5927,7 @@ impl eframe::App for VibeDropApp {
         self.covers.poll();
         self.tick_music();
         self.handle_close(ctx);
+        #[cfg(not(target_os = "android"))]
         self.handle_tray(ctx);
         self.check_for_update();
         self.sync_presence();
