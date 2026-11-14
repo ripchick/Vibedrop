@@ -484,7 +484,7 @@ impl VibeDropApp {
                         self.mic_hotkey_inactive = true;
                         let text = if lang::ru(&lang) {
                             format!(
-                                "Р“РѕСЂСЏС‡Р°СЏ РєР»Р°РІРёС€Р° РѕС‚РєР»СЋС‡РµРЅРёСЏ РјРёРєСЂРѕС„РѕРЅР° РЅРµ СЂР°Р±РѕС‚Р°РµС‚: {}",
+                                "Горячая клавиша отключения микрофона не работает: {}",
                                 lang::tx(&lang, &reason)
                             )
                         } else {
@@ -496,10 +496,7 @@ impl VibeDropApp {
                     let name = self.library.get(&id).map(|e| e.name.clone()).unwrap_or_default();
                     self.inactive_hotkeys.insert(id);
                     let text = if lang::ru(&lang) {
-                        format!(
-                            "Р“РѕСЂСЏС‡Р°СЏ РєР»Р°РІРёС€Р° РґР»СЏ В«{name}В» РЅРµ СЂР°Р±РѕС‚Р°РµС‚: {}",
-                            lang::tx(&lang, &reason)
-                        )
+                        format!("Горячая клавиша для «{name}» не работает: {}", lang::tx(&lang, &reason))
                     } else {
                         format!("Hotkey of \"{name}\" is inactive: {reason}")
                     };
@@ -534,7 +531,7 @@ impl VibeDropApp {
         if let Err(e) = self.library.save(&self.paths.library_file) {
             let text = if lang::ru(&self.settings.language) {
                 format!(
-                    "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ Р±РёР±Р»РёРѕС‚РµРєСѓ: {}",
+                    "Не удалось сохранить библиотеку: {}",
                     lang::tx(&self.settings.language, &e.to_string())
                 )
             } else {
@@ -549,7 +546,7 @@ impl VibeDropApp {
         if let Err(e) = self.settings.save(&self.paths.settings_file) {
             let text = if lang::ru(&self.settings.language) {
                 format!(
-                    "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё: {}",
+                    "Не удалось сохранить настройки: {}",
                     lang::tx(&self.settings.language, &e.to_string())
                 )
             } else {
@@ -564,7 +561,7 @@ impl VibeDropApp {
         if let Err(e) = self.music.save(&self.paths.music_file) {
             let text = if lang::ru(&self.settings.language) {
                 format!(
-                    "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РјСѓР·С‹РєСѓ: {}",
+                    "Не удалось сохранить музыку: {}",
                     lang::tx(&self.settings.language, &e.to_string())
                 )
             } else {
@@ -897,9 +894,7 @@ impl VibeDropApp {
                         duplicates += 1;
                         if duplicates <= 3 {
                             let text = if lang::ru(&lang) {
-                                format!(
-                                    "РЈР¶Рµ РµСЃС‚СЊ РІ Р±РёР±Р»РёРѕС‚РµРєРµ РєР°Рє В«{existing}В», РїСЂРѕРїСѓС‰РµРЅРѕ"
-                                )
+                                format!("Уже есть в библиотеке как «{existing}», пропущено")
                             } else {
                                 format!("Already in your library as \"{existing}\", skipped")
                             };
@@ -925,10 +920,7 @@ impl VibeDropApp {
         }
         if failed > 3 {
             let text = if lang::ru(&lang) {
-                format!(
-                    "Р•С‰С‘ С„Р°Р№Р»РѕРІ РЅРµ СѓРґР°Р»РѕСЃСЊ РёРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ: {}",
-                    failed - 3
-                )
+                format!("Ещё файлов не удалось импортировать: {}", failed - 3)
             } else {
                 format!("{} more files could not be imported", failed - 3)
             };
@@ -940,7 +932,7 @@ impl VibeDropApp {
             let msg = if added == 1 {
                 lang::t(&lang, "Imported 1 sound").to_string()
             } else if lang::ru(&lang) {
-                format!("РРјРїРѕСЂС‚РёСЂРѕРІР°РЅРѕ Р·РІСѓРєРѕРІ: {added}")
+                format!("Импортировано звуков: {added}")
             } else {
                 format!("Imported {added} sounds")
             };
@@ -986,10 +978,7 @@ impl VibeDropApp {
                 if self.settings.delete_managed_copy_on_remove {
                     if let Err(e) = remove_managed_file(&entry, &self.paths.sounds_dir) {
                         let text = if lang::ru(&lang) {
-                            format!(
-                                "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ С„Р°Р№Р»: {}",
-                                lang::tx(&lang, &e.to_string())
-                            )
+                            format!("Не удалось удалить файл: {}", lang::tx(&lang, &e.to_string()))
                         } else {
                             format!("Could not delete the file: {e}")
                         };
@@ -1007,7 +996,7 @@ impl VibeDropApp {
                 self.save_library();
                 self.sync_index();
                 let text = if lang::ru(&lang) {
-                    format!("РЈРґР°Р»РµРЅРѕ РёР· Р±РёР±Р»РёРѕС‚РµРєРё: В«{}В»", entry.name)
+                    format!("Удалено из библиотеки: «{}»", entry.name)
                 } else {
                     format!("Removed \"{}\" from the library", entry.name)
                 };
@@ -1072,7 +1061,7 @@ impl VibeDropApp {
         match self.extract_audio_inner(&entry) {
             Ok(name) => {
                 let text = if lang::ru(&lang) {
-                    format!("Р—РІСѓРє РёР·РІР»РµС‡С‘РЅ: {name}")
+                    format!("Звук извлечён: {name}")
                 } else {
                     format!("Audio extracted: {name}")
                 };
@@ -1115,10 +1104,7 @@ impl VibeDropApp {
         if let Some(h) = &new {
             if let Some(owner) = self.library.find_hotkey_conflict(h, None) {
                 if lang::ru(&self.settings.language) {
-                    return Err(format!(
-                        "РЎРѕС‡РµС‚Р°РЅРёРµ {h} СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ Р·РІСѓРєРѕРј В«{}В»",
-                        owner.name
-                    ));
+                    return Err(format!("Сочетание {h} уже используется звуком «{}»", owner.name));
                 }
                 return Err(format!("{h} is already used by \"{}\"", owner.name));
             }
@@ -1150,7 +1136,7 @@ impl VibeDropApp {
             if self.settings.mic_mute_hotkey.as_deref() == Some(n.as_str()) {
                 if lang::ru(&self.settings.language) {
                     return Err(format!(
-                        "РЎРѕС‡РµС‚Р°РЅРёРµ {n} СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ РѕС‚РєР»СЋС‡РµРЅРёСЏ Р·РІСѓРєР° РјР°СЂС€СЂСѓС‚Р° РјРёРєСЂРѕС„РѕРЅР°"
+                        "Сочетание {n} уже используется для отключения звука маршрута микрофона"
                     ));
                 }
                 return Err(format!("{n} is already used for muting the microphone route"));
@@ -1323,7 +1309,7 @@ impl VibeDropApp {
         self.toast(
             ToastKind::Success,
             if lang::ru(&lang) {
-                format!("Р”РѕР±Р°РІР»РµРЅРѕ С‚СЂРµРєРѕРІ: {count}. РќР°С‡РёРЅР°СЋ СЃРєР°С‡РёРІР°РЅРёРµ.")
+                format!("Добавлено треков: {count}. Начинаю скачивание.")
             } else {
                 format!("Added {count} track(s). Starting the download.")
             },
@@ -1430,7 +1416,7 @@ impl VibeDropApp {
         self.toast(
             ToastKind::Info,
             if lang::ru(&lang) {
-                format!("РЈРґР°Р»РµРЅРѕ: В«{}В»", album.title)
+                format!("Удалено: «{}»", album.title)
             } else {
                 format!("Removed \"{}\"", album.title)
             },
@@ -1454,7 +1440,7 @@ impl VibeDropApp {
                 self.toast(
                     ToastKind::Info,
                     if lang::ru(&lang) {
-                        format!("РљСЌС€ РјСѓР·С‹РєРё РѕС‡РёС‰РµРЅ: СѓРґР°Р»РµРЅРѕ С„Р°Р№Р»РѕРІ вЂ” {removed}.")
+                        format!("Кэш музыки очищен: удалено файлов — {removed}.")
                     } else {
                         format!("Music cache cleared: {removed} file(s) removed.")
                     },
@@ -1587,9 +1573,9 @@ impl VibeDropApp {
         match parse_uri(link) {
             Ok(ProtocolCommand::Play { url }) => {
                 let text = match url.host_str() {
-                    Some(host) if lang::ru(&lang) => format!("РЎРєР°С‡РёРІР°РµРј Р·РІСѓРє СЃ {host}..."),
+                    Some(host) if lang::ru(&lang) => format!("Скачиваем звук с {host}..."),
                     Some(host) => format!("Downloading a sound from {host}..."),
-                    None if lang::ru(&lang) => "РЎРєР°С‡РёРІР°РµРј Р·РІСѓРє РёР· РёРЅС‚РµСЂРЅРµС‚Р°...".to_string(),
+                    None if lang::ru(&lang) => "Скачиваем звук из интернета...".to_string(),
                     None => "Downloading a sound from the internet...".to_string(),
                 };
                 match self.start_download(url, true) {
@@ -1669,7 +1655,7 @@ impl VibeDropApp {
                                 self.toast(
                                     ToastKind::Error,
                                     if lang::ru(lang) {
-                                        format!("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ В«{name}В»: {error}")
+                                        format!("Не удалось скачать «{name}»: {error}")
                                     } else {
                                         format!("Could not download \"{name}\": {error}")
                                     },
@@ -1719,7 +1705,7 @@ impl VibeDropApp {
                     let reason = lang::tx(&lang, &reason);
                     let text = if ru {
                         format!(
-                            "{}: СѓСЃС‚СЂРѕР№СЃС‚РІРѕ В«{device}В» РїРµСЂРµСЃС‚Р°Р»Рѕ СЂР°Р±РѕС‚Р°С‚СЊ ({reason}). VibeDrop РїС‹С‚Р°РµС‚СЃСЏ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ СЃРІСЏР·СЊ.",
+                            "{}: устройство «{device}» перестало работать ({reason}). VibeDrop пытается восстановить связь.",
                             lang::t(&lang, role.label())
                         )
                     } else {
@@ -1732,10 +1718,7 @@ impl VibeDropApp {
                 }
                 EngineEvent::Recovered { role, device } => {
                     let text = if ru {
-                        format!(
-                            "{}: В«{device}В» СЃРЅРѕРІР° СЂР°Р±РѕС‚Р°РµС‚",
-                            lang::t(&lang, role.label())
-                        )
+                        format!("{}: «{device}» снова работает", lang::t(&lang, role.label()))
                     } else {
                         format!("{}: \"{device}\" is working again", role.label())
                     };
@@ -1744,7 +1727,7 @@ impl VibeDropApp {
                 EngineEvent::FellBack { role, wanted, using } => {
                     let text = if ru {
                         format!(
-                            "{}: В«{wanted}В» РЅРµРґРѕСЃС‚СѓРїРЅРѕ. Р—РІСѓРє РёРіСЂР°РµС‚ С‡РµСЂРµР· В«{using}В».",
+                            "{}: «{wanted}» недоступно. Звук играет через «{using}».",
                             lang::t(&lang, role.label())
                         )
                     } else {
@@ -1758,7 +1741,7 @@ impl VibeDropApp {
                 EngineEvent::VoiceLost { device, reason } => {
                     let reason = lang::tx(&lang, &reason);
                     let text = if ru {
-                        format!("Р’Р°С€ РјРёРєСЂРѕС„РѕРЅ: СѓСЃС‚СЂРѕР№СЃС‚РІРѕ В«{device}В» РїРµСЂРµСЃС‚Р°Р»Рѕ СЂР°Р±РѕС‚Р°С‚СЊ ({reason}). VibeDrop РїС‹С‚Р°РµС‚СЃСЏ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ СЃРІСЏР·СЊ.")
+                        format!("Ваш микрофон: устройство «{device}» перестало работать ({reason}). VibeDrop пытается восстановить связь.")
                     } else {
                         format!(
                             "Your microphone: \"{device}\" stopped working ({reason}). VibeDrop is trying to reconnect."
@@ -1768,7 +1751,7 @@ impl VibeDropApp {
                 }
                 EngineEvent::VoiceRecovered { device } => {
                     let text = if ru {
-                        format!("Р’Р°С€ РјРёРєСЂРѕС„РѕРЅ: В«{device}В» СЃРЅРѕРІР° СЂР°Р±РѕС‚Р°РµС‚")
+                        format!("Ваш микрофон: «{device}» снова работает")
                     } else {
                         format!("Your microphone: \"{device}\" is working again")
                     };
@@ -1812,7 +1795,7 @@ impl VibeDropApp {
                         Err(e) => {
                             let message = lang::tx(&lang, &e.to_string());
                             let text = if ru {
-                                format!("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ: {message}")
+                                format!("Не удалось скачать: {message}")
                             } else {
                                 format!("Download failed: {message}")
                             };
@@ -1878,7 +1861,7 @@ impl VibeDropApp {
                 tracing::warn!("could not remove the duplicate download: {e}");
             }
             let text = if lang::ru(&self.settings.language) {
-                format!("РЈР¶Рµ РµСЃС‚СЊ РІ Р±РёР±Р»РёРѕС‚РµРєРµ РєР°Рє В«{existing_name}В»")
+                format!("Уже есть в библиотеке как «{existing_name}»")
             } else {
                 format!("Already in your library as \"{existing_name}\"")
             };
@@ -1911,7 +1894,7 @@ impl VibeDropApp {
         self.save_library();
         self.sync_index();
         let text = if lang::ru(&self.settings.language) {
-            format!("Р”РѕР±Р°РІР»РµРЅРѕ: В«{name}В»")
+            format!("Добавлено: «{name}»")
         } else {
             format!("Added \"{name}\"")
         };
@@ -1935,7 +1918,7 @@ impl VibeDropApp {
             painter.rect_filled(screen, 0.0, Color32::from_black_alpha(190));
             painter.rect_stroke(screen.shrink(18.0), 16.0, Stroke::new(2.0_f32, theme::c_accent()));
             let text = if lang::ru(&self.settings.language) {
-                "РџРµСЂРµС‚Р°С‰РёС‚Рµ С„Р°Р№Р»С‹ WAV / MP3 СЃСЋРґР° РґР»СЏ РёРјРїРѕСЂС‚Р°"
+                "Перетащите файлы WAV / MP3 сюда для импорта"
             } else {
                 "Drop WAV / MP3 / MP4 files to import"
             };
@@ -2076,11 +2059,7 @@ impl VibeDropApp {
                 ui.add_space((ui.available_height() - 60.0).max(0.0));
                 let favorites = self.library.favorites().len();
                 let counts = if lang::ru(&lang) {
-                    format!(
-                        "{} Р·РІСѓРєРѕРІ В· {} РёР·Р±СЂР°РЅРЅС‹С…",
-                        self.library.len(),
-                        favorites
-                    )
+                    format!("{} звуков · {} избранных", self.library.len(), favorites)
                 } else {
                     format!("{} sounds В· {} favorites", self.library.len(), favorites)
                 };
@@ -2508,7 +2487,7 @@ impl VibeDropApp {
         } else if lang::ru(&lang) {
             (
                 lang::t(&lang, "Library"),
-                format!("{total} Р·РІСѓРєРѕРІ В· {favorites} РёР·Р±СЂР°РЅРЅС‹С…"),
+                format!("{total} звуков · {favorites} избранных"),
             )
         } else {
             (
@@ -2556,7 +2535,7 @@ impl VibeDropApp {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     let text = if lang::ru(&lang) {
-                        format!("РЎРєР°С‡РёРІР°РµС‚СЃСЏ {}", dl.label)
+                        format!("Скачивается {}", dl.label)
                     } else {
                         format!("Downloading {}", dl.label)
                     };
@@ -2592,7 +2571,7 @@ impl VibeDropApp {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         let text = if lang::ru(&lang) {
-                            format!("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ: {}", failed.label)
+                            format!("Не удалось скачать: {}", failed.label)
                         } else {
                             format!("Download failed: {}", failed.label)
                         };
@@ -2636,7 +2615,7 @@ impl VibeDropApp {
                 let missing = self.missing.contains(&e.id);
                 if (e.volume - 1.0).abs() > 0.01 {
                     let text = if lang::ru(&lang) {
-                        format!("Р“СЂРѕРјРєРѕСЃС‚СЊ {}%", (e.volume * 100.0).round() as i32)
+                        format!("Громкость {}%", (e.volume * 100.0).round() as i32)
                     } else {
                         format!("Volume {}%", (e.volume * 100.0).round() as i32)
                     };
@@ -3013,7 +2992,7 @@ impl VibeDropApp {
         let ready = self.music.ready_count();
         let cache_mb = self.music.cache_bytes() as f64 / (1024.0 * 1024.0);
         let subtitle = if ru {
-            format!("{total} С‚СЂРµРєРѕРІ В· РіРѕС‚РѕРІРѕ {ready} В· РєСЌС€ {cache_mb:.1} РњР‘")
+            format!("{total} треков · готово {ready} · кэш {cache_mb:.1} МБ")
         } else {
             format!("{total} tracks В· {ready} ready В· {cache_mb:.1} MB cached")
         };
@@ -3456,7 +3435,7 @@ impl VibeDropApp {
                                                     .wrap_mode(egui::TextWrapMode::Truncate),
                                                 );
                                                 let meta = if ru {
-                                                    format!("{} В· {} С‚СЂРµРєРѕРІ", album.artist, album.tracks.len())
+                                                    format!("{} · {} треков", album.artist, album.tracks.len())
                                                 } else {
                                                     format!("{} В· {} tracks", album.artist, album.tracks.len())
                                                 };
@@ -3525,7 +3504,7 @@ impl VibeDropApp {
                             );
                             let prefix = if album.kind.is_playlist() {
                                 if ru {
-                                    "РџР»РµР№Р»РёСЃС‚ В· "
+                                    "Плейлист · "
                                 } else {
                                     "Playlist В· "
                                 }
@@ -3534,7 +3513,7 @@ impl VibeDropApp {
                             };
                             let meta = if ru {
                                 format!(
-                                    "{prefix}{} В· {} С‚СЂРµРєРѕРІ В· {} В· РіРѕС‚РѕРІРѕ {}/{}",
+                                    "{prefix}{} · {} треков · {} · готово {}/{}",
                                     album.artist,
                                     album.tracks.len(),
                                     theme::fmt_time(album.duration_secs()),
@@ -3957,7 +3936,7 @@ impl VibeDropApp {
                             let (text, color) = match find_paired_input(device, &devices.inputs) {
                                 Some(input) => {
                                     let text = if ru {
-                                        format!("Р’ Discord (РёР»Рё РІ РёРіСЂРµ) РІС‹Р±РµСЂРёС‚Рµ В«{input}В» РІ РєР°С‡РµСЃС‚РІРµ РјРёРєСЂРѕС„РѕРЅР°.")
+                                        format!("В Discord (или в игре) выберите «{input}» в качестве микрофона.")
                                     } else {
                                         format!("In Discord (or your game) choose \"{input}\" as the microphone.")
                                     };
@@ -3965,7 +3944,7 @@ impl VibeDropApp {
                                 }
                                 None => {
                                     let text = if ru {
-                                        format!("VibeDrop РЅРµ РЅР°С€С‘Р» СѓСЃС‚СЂРѕР№СЃС‚РІРѕ Р·Р°РїРёСЃРё В«{device}В» СЃСЂРµРґРё СѓСЃС‚СЂРѕР№СЃС‚РІ Р·Р°РїРёСЃРё. РС‰РёС‚Рµ РµРіРѕ РїР°СЂРЅРѕРµ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ В«OutputВ» РІ РіРѕР»РѕСЃРѕРІРѕРј С‡Р°С‚Рµ.")
+                                        format!("VibeDrop не нашёл устройство записи «{device}» среди устройств записи. Ищите его парное устройство «Output» в голосовом чате.")
                                     } else {
                                         format!("VibeDrop could not find the recording side of \"{device}\" among the recording devices. Look for its matching \"Output\" device in your voice chat.")
                                     };
@@ -4038,11 +4017,11 @@ impl VibeDropApp {
                             lang::t(&lang, "Looking for audio devices...").to_string()
                         } else if ru {
                             format!(
-                                "РЈСЃС‚СЂРѕР№СЃС‚РІ РІС‹РІРѕРґР°: {} / РІРІРѕРґР°: {}. Р’С‹РІРѕРґ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: {}. Р’РІРѕРґ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: {}.",
+                                "Устройств вывода: {} / ввода: {}. Вывод по умолчанию: {}. Ввод по умолчанию: {}.",
                                 devices.outputs.len(),
                                 devices.inputs.len(),
-                                devices.default_output.as_deref().unwrap_or("РЅРµС‚"),
-                                devices.default_input.as_deref().unwrap_or("РЅРµС‚"),
+                                devices.default_output.as_deref().unwrap_or("нет"),
+                                devices.default_input.as_deref().unwrap_or("нет"),
                             )
                         } else {
                             format!(
@@ -4513,7 +4492,7 @@ impl VibeDropApp {
                         ProtocolState::NotRegistered => (lang::t(&lang, "Not registered").to_string(), theme::c_text_dim()),
                         ProtocolState::RegisteredElsewhere(cmd) => {
                             let text = if ru {
-                                format!("Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅРѕ РґР»СЏ РґСЂСѓРіРѕР№ РїСЂРѕРіСЂР°РјРјС‹: {cmd}")
+                                format!("Зарегистрировано для другой программы: {cmd}")
                             } else {
                                 format!("Registered for another program: {cmd}")
                             };
@@ -4521,7 +4500,7 @@ impl VibeDropApp {
                         }
                         ProtocolState::Partial(missing) => {
                             let text = if ru {
-                                format!("Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅРѕ С‡Р°СЃС‚РёС‡РЅРѕ. РќРµ С…РІР°С‚Р°РµС‚: {missing}")
+                                format!("Зарегистрировано частично. Не хватает: {missing}")
                             } else {
                                 format!("Partly registered. Missing: {missing}")
                             };
@@ -4557,7 +4536,7 @@ impl VibeDropApp {
                         (None, Some(hk)) => {
                             let text = if ru {
                                 format!(
-                                    "РђРєС‚РёРІРЅС‹С… РіРѕСЂСЏС‡РёС… РєР»Р°РІРёС€: {}. РћРЅРё СЂР°Р±РѕС‚Р°СЋС‚, РїРѕРєР° VibeDrop Р·Р°РїСѓС‰РµРЅ, РґР°Р¶Рµ РІ С„РѕРЅРµ, Рё СЃРЅРёРјР°СЋС‚СЃСЏ РїСЂРё РІС‹С…РѕРґРµ.",
+                                    "Активных горячих клавиш: {}. Они работают, пока VibeDrop запущен, даже в фоне, и снимаются при выходе.",
                                     hk.active_count()
                                 )
                             } else {
@@ -4844,7 +4823,7 @@ impl VibeDropApp {
         let mut apply = false;
         let mut clear = false;
         let title = if ru {
-            format!("Р“РѕСЂСЏС‡Р°СЏ РєР»Р°РІРёС€Р° РґР»СЏ В«{}В»", d.name)
+            format!("Горячая клавиша для «{}»", d.name)
         } else {
             format!("Hotkey for \"{}\"", d.name)
         };
@@ -4910,7 +4889,7 @@ impl VibeDropApp {
                     Ok(()) => {
                         close = true;
                         let toast = if ru {
-                            format!("Р“РѕСЂСЏС‡Р°СЏ РєР»Р°РІРёС€Р° Р·Р°РґР°РЅР° РґР»СЏ В«{}В»", d.name)
+                            format!("Горячая клавиша задана для «{}»", d.name)
                         } else {
                             format!("Hotkey set for \"{}\"", d.name)
                         };
@@ -4978,7 +4957,7 @@ impl VibeDropApp {
             let error = outcome.err();
             // Static English errors that this dialog itself produces get translated here.
             if error.as_deref() == Some("Paste a link first") && lang::ru(&lang) {
-                d.error = Some("РЎРЅР°С‡Р°Р»Р° РІСЃС‚Р°РІСЊС‚Рµ СЃСЃС‹Р»РєСѓ".to_string());
+                d.error = Some("Сначала вставьте ссылку".to_string());
             } else {
                 d.error = error;
             }
@@ -5055,7 +5034,7 @@ impl VibeDropApp {
             .show(ctx, |ui| {
                 ui.set_width(400.0);
                 let text = if lang::ru(&lang) {
-                    "Р‘СѓРґСѓС‚ СѓРґР°Р»РµРЅС‹: Р±РёР±Р»РёРѕС‚РµРєР° Р·РІСѓРєРѕРІ, РёСЃС‚РѕСЂРёСЏ, Р°Р»СЊР±РѕРјС‹ РјСѓР·С‹РєРё Рё РєСЌС€ MP3, Р° С‚Р°РєР¶Рµ РІСЃРµ РєРѕРїРёРё С„Р°Р№Р»РѕРІ, РєРѕС‚РѕСЂС‹Рµ VibeDrop С…СЂР°РЅРёР» РІ СЃРІРѕРµР№ РїР°РїРєРµ. РќР°СЃС‚СЂРѕР№РєРё (СѓСЃС‚СЂРѕР№СЃС‚РІР°, РіРѕСЂСЏС‡РёРµ РєР»Р°РІРёС€Рё, РІРЅРµС€РЅРёР№ РІРёРґ) РѕСЃС‚Р°РЅСѓС‚СЃСЏ. РћС‚РјРµРЅРёС‚СЊ СЌС‚Рѕ РЅРµР»СЊР·СЏ."
+                    "Будут удалены: библиотека звуков, история, альбомы музыки и кэш MP3, а также все копии файлов, которые VibeDrop хранил в своей папке. Настройки (устройства, горячие клавиши, внешний вид) останутся. Отменить это нельзя."
                 } else {
                     "This removes: the sound library, the history, the music albums and the MP3 cache, plus every copy of a file that VibeDrop kept in its own folder. Your settings (devices, hotkeys, appearance) are kept. This cannot be undone."
                 };
@@ -5089,7 +5068,7 @@ impl VibeDropApp {
         if confirmed {
             self.clear_all_data();
             let text = if lang::ru(&lang) {
-                "Р”Р°РЅРЅС‹Рµ РѕС‡РёС‰РµРЅС‹."
+                "Данные очищены."
             } else {
                 "The data was cleared."
             };
@@ -5154,19 +5133,19 @@ fn mic_setup_steps(lang: &str) -> Vec<&'static str> {
     if std::env::consts::OS == "linux" {
         return if lang::ru(lang) {
             vec![
-                "Linux-РјР°СЂС€СЂСѓС‚ СЃС‚СЂРѕРёС‚СЃСЏ РЅР° СЃСЂРµРґСЃС‚РІР°С… РІР°С€РµРіРѕ Р·РІСѓРєРѕРІРѕРіРѕ СЃРµСЂРІРµСЂР° (PipeWire), РґСЂР°Р№РІРµСЂС‹ РЅРµ РЅСѓР¶РЅС‹.",
-                "1. РџР°РєРµС‚ VibeDrop СѓР¶Рµ СЃРѕР·РґР°Р» РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ РєР°Р±РµР»СЊ: СЃС‚РѕСЂРѕРЅР° РІРѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёСЏ В«vibedrop_routeВ»",
-                "   (РІ РЅРµС‘ VibeDrop РёРіСЂР°РµС‚) Рё РјРёРєСЂРѕС„РѕРЅ В«VibeDrop Microphone (Virtual)В» (РµРіРѕ РІС‹Р±РёСЂР°РµС‚ С‡Р°С‚).",
-                "   Р•СЃР»Рё РєР°Р±РµР»СЏ РЅРµС‚ вЂ” РїРµСЂРµСѓСЃС‚Р°РЅРѕРІРёС‚Рµ РїР°РєРµС‚ РёР»Рё СЃРѕР·РґР°Р№С‚Рµ РІСЂСѓС‡РЅСѓСЋ:",
+                "Linux-маршрут строится на средствах вашего звукового сервера (PipeWire), драйверы не нужны.",
+                "1. Пакет VibeDrop уже создал виртуальный кабель: сторона воспроизведения «vibedrop_route»",
+                "   (в неё VibeDrop играет) и микрофон «VibeDrop Microphone (Virtual)» (его выбирает чат).",
+                "   Если кабеля нет — переустановите пакет или создайте вручную:",
                 "   pactl load-module module-null-sink sink_name=VibeDrop_Route",
-                "2. РќР°Р¶РјРёС‚Рµ Р·РґРµСЃСЊ В«РћР±РЅРѕРІРёС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°В», РІС‹Р±РµСЂРёС‚Рµ В«vibedrop_routeВ» РєР°Рє РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР° РІС‹С€Рµ",
-                "   Рё РЅР°Р¶РјРёС‚Рµ В«РџСЂРѕРІРµСЂРёС‚СЊ РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР°В».",
-                "3. Р’ Discord, РёРіСЂРµ РёР»Рё СЂРµРєРѕСЂРґРµСЂРµ РІС‹Р±РµСЂРёС‚Рµ В«VibeDrop Microphone (Virtual)В» РІ РєР°С‡РµСЃС‚РІРµ РјРёРєСЂРѕС„РѕРЅР° вЂ”",
-                "   СЌС‚Рѕ СЃС‚РѕСЂРѕРЅР° Р·Р°РїРёСЃРё РєР°Р±РµР»СЏ, Р°РЅР°Р»РѕРі В«CABLE OutputВ» Сѓ VB-CABLE.",
-                "4. Р§С‚РѕР±С‹ СЃРѕР±РµСЃРµРґРЅРёРєРё СЃР»С‹С€Р°Р»Рё Рё РІР°С€ РіРѕР»РѕСЃ, РІРєР»СЋС‡РёС‚Рµ В«РџРѕРґРјРµС€РёРІР°С‚СЊ РјРѕР№ РјРёРєСЂРѕС„РѕРЅ РІ РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР°В»",
-                "   Рё РІС‹Р±РµСЂРёС‚Рµ СЃРІРѕР№ РЅР°СЃС‚РѕСЏС‰РёР№ РјРёРєСЂРѕС„РѕРЅ.",
-                "5. РћР±С‹С‡РЅС‹Рµ СѓСЃС‚СЂРѕР№СЃС‚РІР° (В«defaultВ», В«pipewireВ», В«sysdefault:вЂ¦В») РІ СЃРїРёСЃРєРµ РјР°СЂС€СЂСѓС‚Р° СЃРєСЂС‹С‚С‹: РѕРЅРё РІРµРґСѓС‚",
-                "   РІ С‚РѕС‚ Р¶Рµ РІС‹С…РѕРґ, РєРѕС‚РѕСЂС‹Р№ РІС‹ СЃР»С‹С€РёС‚Рµ СЃР°РјРё, Рё РІР°С€ РіРѕР»РѕСЃ Р·РІСѓС‡Р°Р» Р±С‹ Сѓ РІР°СЃ РІ РЅР°СѓС€РЅРёРєР°С….",
+                "2. Нажмите здесь «Обновить устройства», выберите «vibedrop_route» как маршрут микрофона выше",
+                "   и нажмите «Проверить маршрут микрофона».",
+                "3. В Discord, игре или рекордере выберите «VibeDrop Microphone (Virtual)» в качестве микрофона —",
+                "   это сторона записи кабеля, аналог «CABLE Output» у VB-CABLE.",
+                "4. Чтобы собеседники слышали и ваш голос, включите «Подмешивать мой микрофон в маршрут микрофона»",
+                "   и выберите свой настоящий микрофон.",
+                "5. Обычные устройства («default», «pipewire», «sysdefault:…») в списке маршрута скрыты: они ведут",
+                "   в тот же выход, который вы слышите сами, и ваш голос звучал бы у вас в наушниках.",
             ]
         } else {
             vec![
@@ -5188,16 +5167,16 @@ fn mic_setup_steps(lang: &str) -> Vec<&'static str> {
     }
     if lang::ru(lang) {
         vec![
-            "Windows СЃР°РјР° РЅРµ СѓРјРµРµС‚ РѕС‚РїСЂР°РІР»СЏС‚СЊ Р·РІСѓРє РїСЂРѕРіСЂР°РјРјС‹ РІ РјРёРєСЂРѕС„РѕРЅ. РќСѓР¶РµРЅ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ Р°СѓРґРёРѕРєР°Р±РµР»СЊ, Р° VibeDrop",
-            "РЅРµ СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РґСЂР°Р№РІРµСЂС‹. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ РєР°Р±РµР»СЊ СЃР°РјРё, РЅР°РїСЂРёРјРµСЂ Р±РµСЃРїР»Р°С‚РЅС‹Р№ VB-CABLE, VoiceMeeter РёР»Рё Virtual Audio Cable.",
-            "1. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ РµРіРѕ (РµСЃР»Рё СѓСЃС‚Р°РЅРѕРІС‰РёРє РїРѕРїСЂРѕСЃРёС‚, РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚Рµ Windows), Р·Р°С‚РµРј РЅР°Р¶РјРёС‚Рµ Р·РґРµСЃСЊ В«РћР±РЅРѕРІРёС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°В».",
-            "2. Р’С‹Р±РµСЂРёС‚Рµ СЃС‚РѕСЂРѕРЅСѓ РІРѕСЃРїСЂРѕРёР·РІРµРґРµРЅРёСЏ (В«CABLE InputВ») РєР°Рє РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР° РІС‹С€Рµ Рё РЅР°Р¶РјРёС‚Рµ В«РџСЂРѕРІРµСЂРёС‚СЊ РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР°В».",
-            "3. Р’ Discord, РёРіСЂРµ РёР»Рё СЂРµРєРѕСЂРґРµСЂРµ РІС‹Р±РµСЂРёС‚Рµ СЃС‚РѕСЂРѕРЅСѓ Р·Р°РїРёСЃРё (В«CABLE OutputВ») РІ РєР°С‡РµСЃС‚РІРµ РјРёРєСЂРѕС„РѕРЅР°.",
-            "   РўРѕС‡РЅРѕРµ РЅР°Р·РІР°РЅРёРµ VibeDrop РїРѕРєР°Р¶РµС‚ РїРѕРґ РјР°СЂС€СЂСѓС‚РѕРј, РєРѕРіРґР° С‚РѕС‚ Р·Р°СЂР°Р±РѕС‚Р°РµС‚.",
-            "4. Р§С‚РѕР±С‹ СЃРѕР±РµСЃРµРґРЅРёРєРё СЃР»С‹С€Р°Р»Рё Рё РІР°С€ РіРѕР»РѕСЃ, РІРєР»СЋС‡РёС‚Рµ В«РџРѕРґРјРµС€РёРІР°С‚СЊ РјРѕР№ РјРёРєСЂРѕС„РѕРЅ РІ РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР°В» Рё РІС‹Р±РµСЂРёС‚Рµ СЃРІРѕР№",
-            "   РЅР°СЃС‚РѕСЏС‰РёР№ РјРёРєСЂРѕС„РѕРЅ. РќРµ РІРєР»СЋС‡Р°Р№С‚Рµ РґР»СЏ РЅРµРіРѕ Windows-С„СѓРЅРєС†РёСЋ В«РџСЂРѕСЃР»СѓС€РёРІР°С‚СЊ СЃ СЌС‚РѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР°В»: РІР°СЃ Р±СѓРґСѓС‚ СЃР»С‹С€Р°С‚СЊ РґРІР°Р¶РґС‹.",
-            "5. Р’ Discord > Р“РѕР»РѕСЃ Рё РІРёРґРµРѕ РѕС‚РєР»СЋС‡РёС‚Рµ С€СѓРјРѕРїРѕРґР°РІР»РµРЅРёРµ Рё Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєСѓСЋ С‡СѓРІСЃС‚РІРёС‚РµР»СЊРЅРѕСЃС‚СЊ РјРёРєСЂРѕС„РѕРЅР°, РёРЅР°С‡Рµ РєРѕСЂРѕС‚РєРёРµ",
-            "   Р·РІСѓРєРё РјРѕРіСѓС‚ РѕР±СЂРµР·Р°С‚СЊСЃСЏ.",
+            "Windows сама не умеет отправлять звук программы в микрофон. Нужен виртуальный аудиокабель, а VibeDrop",
+            "не устанавливает драйверы. Установите кабель сами, например бесплатный VB-CABLE, VoiceMeeter или Virtual Audio Cable.",
+            "1. Установите его (если установщик попросит, перезапустите Windows), затем нажмите здесь «Обновить устройства».",
+            "2. Выберите сторону воспроизведения («CABLE Input») как маршрут микрофона выше и нажмите «Проверить маршрут микрофона».",
+            "3. В Discord, игре или рекордере выберите сторону записи («CABLE Output») в качестве микрофона.",
+            "   Точное название VibeDrop покажет под маршрутом, когда тот заработает.",
+            "4. Чтобы собеседники слышали и ваш голос, включите «Подмешивать мой микрофон в маршрут микрофона» и выберите свой",
+            "   настоящий микрофон. Не включайте для него Windows-функцию «Прослушивать с этого устройства»: вас будут слышать дважды.",
+            "5. В Discord > Голос и видео отключите шумоподавление и автоматическую чувствительность микрофона, иначе короткие",
+            "   звуки могут обрезаться.",
         ]
     } else {
         MIC_SETUP_STEPS.to_vec()
@@ -5217,26 +5196,26 @@ fn describe_state(lang: &str, state: &RouteState) -> String {
             device,
             fallback_from: None,
             ..
-        } => format!("РРіСЂР°РµС‚ С‡РµСЂРµР· В«{device}В»"),
+        } => format!("Играет через «{device}»"),
         RouteState::Active {
             device,
             fallback_from: Some(wanted),
             ..
-        } => format!("В«{wanted}В» РЅРµРґРѕСЃС‚СѓРїРЅРѕ, Р·РІСѓРє РёРіСЂР°РµС‚ С‡РµСЂРµР· В«{device}В»"),
-        RouteState::Missing { wanted } => format!("В«{wanted}В» РЅРµ РїРѕРґРєР»СЋС‡РµРЅРѕ. VibeDrop РїСЂРѕРґРѕР»Р¶Р°РµС‚ РёСЃРєР°С‚СЊ."),
+        } => format!("«{wanted}» недоступно, звук играет через «{device}»"),
+        RouteState::Missing { wanted } => format!("«{wanted}» не подключено. VibeDrop продолжает искать."),
         RouteState::Lost { device, reason } => {
             format!(
-                "В«{device}В» РїРµСЂРµСЃС‚Р°Р»Рѕ СЂР°Р±РѕС‚Р°С‚СЊ ({}). VibeDrop РїС‹С‚Р°РµС‚СЃСЏ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ СЃРІСЏР·СЊ.",
+                "«{device}» перестало работать ({}). VibeDrop пытается восстановить связь.",
                 lang::tx(lang, reason)
             )
         }
         RouteState::Conflict { device } => format!(
-            "В«{device}В» вЂ” СЌС‚Рѕ РІР°С€ РѕР±С‹С‡РЅС‹Р№ РІС‹С…РѕРґ РёР»Рё С‚Р° Р¶Рµ Р·РІСѓРєРѕРІР°СЏ РєР°СЂС‚Р°, С‡С‚Рѕ Рё Сѓ РЅР°СѓС€РЅРёРєРѕРІ. Р’С‹Р±РµСЂРёС‚Рµ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ РєР°Р±РµР»СЊ РёР»Рё РґСЂСѓРіРѕРµ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ."
+            "«{device}» — это ваш обычный выход или та же звуковая карта, что и у наушников. Выберите виртуальный кабель или другое устройство."
         ),
-        RouteState::Failed { reason } => format!("РЈСЃС‚СЂРѕР№СЃС‚РІРѕ РЅРµР»СЊР·СЏ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ: {}", lang::tx(lang, reason)),
+        RouteState::Failed { reason } => format!("Устройство нельзя использовать: {}", lang::tx(lang, reason)),
         RouteState::Standby { reason } => {
             if reason == "Waiting for the microphone route to start." {
-                "РћР¶РёРґР°РЅРёРµ Р·Р°РїСѓСЃРєР° РјР°СЂС€СЂСѓС‚Р° РјРёРєСЂРѕС„РѕРЅР°.".to_string()
+                "Ожидание запуска маршрута микрофона.".to_string()
             } else {
                 lang::tx(lang, reason)
             }
@@ -5255,10 +5234,7 @@ fn route_status(ui: &mut Ui, lang: &str, state: &RouteState) {
         } => (
             theme::c_accent(),
             if lang::ru(lang) {
-                format!(
-                    "РРіСЂР°РµС‚ С‡РµСЂРµР· В«{device}В» ({} РєР“С†)",
-                    *rate as f32 / 1000.0
-                )
+                format!("Играет через «{device}» ({} кГц)", *rate as f32 / 1000.0)
             } else {
                 format!("Playing on \"{device}\" ({} kHz)", *rate as f32 / 1000.0)
             },
@@ -5284,7 +5260,7 @@ fn voice_status(ui: &mut Ui, lang: &str, state: &RouteState) {
         } => {
             let text = if lang::ru(lang) {
                 format!(
-                    "\u{25CF} РЎР»СѓС€Р°РµРј В«{device}В» ({} РєР“С†, {channels} РєР°РЅР°Р»(РѕРІ)) Рё РїРѕРґРјРµС€РёРІР°РµРј РµРіРѕ РІ РјР°СЂС€СЂСѓС‚ РјРёРєСЂРѕС„РѕРЅР°",
+                    "\u{25CF} Слушаем «{device}» ({} кГц, {channels} канал(ов)) и подмешиваем его в маршрут микрофона",
                     *rate as f32 / 1000.0
                 )
             } else {
@@ -5306,8 +5282,8 @@ fn explain_devices(lang: &str, kind: DeviceKind, count: usize, error: Option<&st
         return explain_device_list(kind, count, error);
     }
     let noun = match kind {
-        DeviceKind::Output => "РІС‹РІРѕРґР°",
-        DeviceKind::Input => "РІРІРѕРґР°",
+        DeviceKind::Output => "вывода",
+        DeviceKind::Input => "ввода",
     };
     let windows = std::env::consts::OS == "windows";
     if let Some(e) = error {
@@ -5370,7 +5346,7 @@ fn mic_device_combo(ui: &mut Ui, lang: &str, id: &str, value: &mut Option<String
         Some(name) if devices.contains(name) => name.clone(),
         Some(name) => {
             if lang::ru(lang) {
-                format!("{name} (РЅРµ РїРѕРґРєР»СЋС‡РµРЅРѕ)")
+                format!("{name} (не подключено)")
             } else {
                 format!("{name} (not connected)")
             }
@@ -5513,9 +5489,9 @@ fn device_combo(
     default_name: Option<&str>,
 ) {
     let default_label = match default_name {
-        Some(d) if lang::ru(lang) => format!("РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ ({d})"),
+        Some(d) if lang::ru(lang) => format!("По умолчанию ({d})"),
         Some(d) => format!("System default ({d})"),
-        None if lang::ru(lang) => "РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ (СѓСЃС‚СЂРѕР№СЃС‚РІ РЅРµС‚)".to_string(),
+        None if lang::ru(lang) => "По умолчанию (устройств нет)".to_string(),
         None => "System default (none available)".to_string(),
     };
     let selected = match value {
@@ -5523,7 +5499,7 @@ fn device_combo(
         Some(name) if devices.contains(name) => name.clone(),
         Some(name) => {
             if lang::ru(lang) {
-                format!("{name} (РЅРµ РїРѕРґРєР»СЋС‡РµРЅРѕ)")
+                format!("{name} (не подключено)")
             } else {
                 format!("{name} (not connected)")
             }
@@ -5544,7 +5520,7 @@ fn device_combo(
 /// A device name with a "(virtual)" tag for virtual audio cables.
 fn device_label(lang: &str, name: &str) -> String {
     if is_virtual_device(name) && lang::ru(lang) {
-        format!("{name}  (РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№)")
+        format!("{name}  (виртуальный)")
     } else if is_virtual_device(name) {
         format!("{name}  (virtual)")
     } else {
