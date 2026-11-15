@@ -2,19 +2,6 @@
 
 ## Unreleased
 
-## 0.14.3
-
-### Added
-- Discord Rich Presence now shows the cover of the album that is playing as its picture, with
-  the track title as the tooltip. The elapsed time runs on a progress bar (start and end times
-  are sent), so it no longer freezes.
-
-### Fixed
-- Discord Rich Presence: the elapsed time used to freeze and jump back because Discord answers
-  every command and nobody read those answers, so they piled up in the pipe until it was full
-  and the writes blocked. The answers are read away after every update.
-- The Russian texts that were damaged by a wrong encoding are proper UTF-8 again.
-
 ## 0.14.2
 
 ### Added
@@ -25,15 +12,19 @@
 - **Update check.** VibeDrop asks GitHub in the background whether a newer release exists and,
   if so, shows a clickable notification that opens the download page. Nothing is downloaded
   on its own.
-- **Close into the tray.** Closing the window can hide VibeDrop in the tray instead of quitting
-  it, so the global hotkeys keep working. The choice is in Settings -> Application (Quit /
-  Minimize / Hide in the tray) and defaults to quitting.
+- **Discord Rich Presence shows the cover of the album** that is playing, with the track title
+  as the tooltip, and the program icon when nothing is playing. Discord draws the elapsed time
+  and the progress bar itself, from the timestamps.
 
 ### Fixed
-- Discord Rich Presence: the elapsed time no longer freezes. Discord answers every command and
-  nobody read those answers, so they piled up in the pipe until it was full and the writes
-  blocked. The answers are read away after every update.
-- The Russian texts that were damaged by a wrong encoding are proper UTF-8 again.
+- Discord Rich Presence: the elapsed time used to freeze and jump back because Discord answers
+  every command and nobody read those answers, so they piled up in the pipe until it was full
+  and the writes blocked. The answers are read away after every update.
+- The Russian texts that were damaged by a wrong encoding are proper UTF-8 again (the language
+  selector, the counters in the sidebar and the settings were affected).
+
+### Removed
+- The tray icon and the "hide in the tray" option: closing the window quits VibeDrop again.
 
 ## 0.14.1
 

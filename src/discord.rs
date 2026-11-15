@@ -11,6 +11,9 @@ use std::time::Duration;
 
 pub const CLIENT_ID: &str = "1569429358538526820";
 const ACTIVITY_NAME: &str = "VibeDrop";
+/// The program icon as a picture address. Discord fetches it itself, so the icon in Discord is
+/// always the current one (the asset uploaded in the developer portal stays untouched).
+pub const APP_ICON_URL: &str = "https://raw.githubusercontent.com/ripchick/Vibedrop/main/assets/icon.png";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscordStatus {
@@ -288,10 +291,18 @@ fn activity_payload(pid: u32, presence: Option<&Presence>) -> String {
                 json_str(state),
             )
         }
-        _ => format!(
-            "{{\"name\":\"{ACTIVITY_NAME}\",\"type\":0,\"application_id\":\"{CLIENT_ID}\",\
-             \"assets\":{{\"large_image\":\"logo\"}},\"instance\":true}}"
-        ),
+        _ => {
+            // Nothing is playing: the card shows the program icon.
+            let image = match presence.and_then(|p| p.image.as_deref()) {
+                Some(url) if !url.is_empty() => url,
+                _ => APP_ICON_URL,
+            };
+            format!(
+                "{{\"name\":\"{ACTIVITY_NAME}\",\"type\":0,\"application_id\":\"{CLIENT_ID}\",\
+                 \"assets\":{{\"large_image\":{}}},\"instance\":true}}",
+                json_str(image)
+            )
+        }
     };
     format!(
         "{{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"{}\",\"args\":{{\"pid\":{pid},\"activity\":{activity}}}}}",
@@ -400,6 +411,7 @@ mod tests {
         let payload = activity_payload(42, None);
         let value: serde_json::Value = serde_json::from_str(&payload).expect("valid JSON");
         assert_eq!(value["args"]["activity"]["type"], 0);
-        assert_eq!(value["args"]["activity"]["assets"]["large_image"], "logo");
+        // The program icon is a picture address, so Discord always shows the current one.
+        assert_eq!(value["args"]["activity"]["assets"]["large_image"], APP_ICON_URL);
     }
 }
