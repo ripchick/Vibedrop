@@ -208,6 +208,7 @@ fn ru_lookup(text: &str) -> Option<&'static str> {
         "APPLICATION" => "ПРИЛОЖЕНИЕ",
         "When the window is closed" => "При закрытии окна",
         "Minimize (hotkeys keep working)" => "Свернуть (горячие клавиши продолжают работать)",
+        "A real microphone or headset microphone. Switch this on if you want your voice and VibeDrop's sounds to reach Discord through the one device you choose there. Your voice goes only into the microphone route, never into your headphones. Leave it off if you already send your voice another way (for example Windows \"Listen to this device\")." => "Настоящий микрофон или гарнитура. Включите, если хотите, чтобы ваш голос и звуки VibeDrop попадали в Discord через одно устройство, выбранное там. Ваш голос идёт только в маршрут микрофона и никогда — в наушники. Оставьте выключенным, если голос уже передаёте иначе (например, через «Прослушивать с данного устройства» в Windows).",
         "Listening to VibeDrop" => "Слушает VibeDrop",
         "Playing a sound" => "Играет звук",
         "Importing files" => "Импорт файлов",
